@@ -532,13 +532,13 @@ export default {
                           padding: '0.5rem',
                           borderRadius: '8px',
                           border: 'none',
-                          background: '#2563eb',
+                          background: '#111827',
                           color: '#fff',
                           fontWeight: 600,
-                          cursor: 'pointer',
+                          cursor: subscribingId.value === (p._id || p.id) ? 'wait' : 'pointer',
                         }}
                       >
-                        {subscribingId.value === (p._id || p.id) ? 'Redirecting…' : 'Subscribe (Stripe Checkout)'}
+                        {subscribingId.value === (p._id || p.id) ? 'Redirecting…' : 'Subscribe'}
                       </button>
                     )}
                   </div>
