@@ -3,6 +3,7 @@ import logo from '../../assets/logo.jpeg';
 import PartnerChat from './PartnerChat.jsx';
 import PartnerVoiceCall from './PartnerVoiceCall.jsx';
 import PartnerEarningsHistory from './PartnerEarningsHistory.jsx';
+import PartnerProfile from './PartnerProfile.jsx';
 import api from '../../services/api.js';
 import {
   ensurePartnerVoiceConnected,
@@ -282,7 +283,7 @@ export default {
         case 'payments':
           return <PartnerEarningsHistory />;
         case 'profile':
-          return renderPlaceholder('Profile Settings');
+          return <PartnerProfile />;
         default:
           return renderDashboard();
       }

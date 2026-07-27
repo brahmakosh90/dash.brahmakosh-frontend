@@ -284,7 +284,12 @@ export default {
       loading.value = true;
       error.value = null;
       try {
-        let res = await api.confirmUserPlanPayment(paymentIntentId);
+        let res;
+        try {
+          res = await api.confirmUserPlanPayment(paymentIntentId);
+        } catch (_) {
+          // Not a plan payment intent — fall back to legacy top-up confirm
+        }
         if (!res?.success) {
           res = await api.request('/user/payment/confirm', {
             method: 'POST',

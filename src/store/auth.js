@@ -312,11 +312,14 @@ export function useAuth() {
       auth.user.value = userData;
       return response;
     } catch (error) {
-      // Clear role-specific token on error
-      auth.token.value = null;
-      auth.user.value = null;
-      const storageKey = `token_${currentRole || 'unknown'}`;
-      localStorage.removeItem(storageKey);
+      // On 401/invalid token, silently clear the stale token instead of throwing
+      if (error.status === 401 || error.message?.includes('Invalid or expired token')) {
+        auth.token.value = null;
+        auth.user.value = null;
+        const storageKey = `token_${currentRole || 'unknown'}`;
+        localStorage.removeItem(storageKey);
+        return;
+      }
       throw error;
     } finally {
       loading.value = false;

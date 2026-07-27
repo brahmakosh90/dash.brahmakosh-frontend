@@ -1118,6 +1118,66 @@ class ApiService {
   async claimFreeUserPlan(planId) {
     return this.request('/user/plans/claim-free', { method: 'POST', body: { planId } });
   }
+
+  // Admin Payment Management
+  async getAdminPaymentLogs(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request(`/admin/payments/logs${qs ? '?' + qs : ''}`);
+  }
+  async getAdminPaymentCredits(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request(`/admin/payments/credits${qs ? '?' + qs : ''}`);
+  }
+  async getAdminUserPaymentHistory(userId) {
+    return this.request(`/admin/payments/users/${userId}/history`);
+  }
+  async adjustAdminUserCredits(userId, amount, description) {
+    return this.request(`/admin/payments/users/${userId}/adjust-credits`, {
+      method: 'POST', body: { amount, description }
+    });
+  }
+  async getAdminPaymentSubscriptions(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request(`/admin/payments/subscriptions${qs ? '?' + qs : ''}`);
+  }
+  async cancelAdminSubscription(subId, immediately = false) {
+    return this.request(`/admin/payments/subscriptions/${subId}/cancel`, {
+      method: 'POST', body: { immediately }
+    });
+  }
+  async getAdminPaymentAnalytics() {
+    return this.request('/admin/payments/analytics');
+  }
+
+  // Client Payment Management
+  async getClientPaymentLogs(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request(`/client/payments/logs${qs ? '?' + qs : ''}`);
+  }
+  async getClientPaymentCredits(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request(`/client/payments/credits${qs ? '?' + qs : ''}`);
+  }
+  async getClientUserPaymentHistory(userId) {
+    return this.request(`/client/payments/users/${userId}/history`);
+  }
+  async adjustClientUserCredits(userId, amount, description) {
+    return this.request(`/client/payments/users/${userId}/adjust-credits`, {
+      method: 'POST', body: { amount, description }
+    });
+  }
+  async getClientPaymentSubscriptions(params = {}) {
+    const qs = new URLSearchParams(params).toString();
+    return this.request(`/client/payments/subscriptions${qs ? '?' + qs : ''}`);
+  }
+  async cancelClientSubscription(subId, immediately = false) {
+    return this.request(`/client/payments/subscriptions/${subId}/cancel`, {
+      method: 'POST', body: { immediately }
+    });
+  }
+  async getClientPaymentAnalytics() {
+    return this.request('/client/payments/analytics');
+  }
 }
 
 const apiService = new ApiService();
@@ -1275,7 +1335,23 @@ const api = {
   createUserPlanPaymentIntent: apiService.createUserPlanPaymentIntent.bind(apiService),
   confirmUserPlanPayment: apiService.confirmUserPlanPayment.bind(apiService),
   createUserSubscriptionCheckout: apiService.createUserSubscriptionCheckout.bind(apiService),
-  claimFreeUserPlan: apiService.claimFreeUserPlan.bind(apiService)
+  claimFreeUserPlan: apiService.claimFreeUserPlan.bind(apiService),
+
+  getAdminPaymentLogs: apiService.getAdminPaymentLogs.bind(apiService),
+  getAdminPaymentCredits: apiService.getAdminPaymentCredits.bind(apiService),
+  getAdminUserPaymentHistory: apiService.getAdminUserPaymentHistory.bind(apiService),
+  adjustAdminUserCredits: apiService.adjustAdminUserCredits.bind(apiService),
+  getAdminPaymentSubscriptions: apiService.getAdminPaymentSubscriptions.bind(apiService),
+  cancelAdminSubscription: apiService.cancelAdminSubscription.bind(apiService),
+  getAdminPaymentAnalytics: apiService.getAdminPaymentAnalytics.bind(apiService),
+
+  getClientPaymentLogs: apiService.getClientPaymentLogs.bind(apiService),
+  getClientPaymentCredits: apiService.getClientPaymentCredits.bind(apiService),
+  getClientUserPaymentHistory: apiService.getClientUserPaymentHistory.bind(apiService),
+  adjustClientUserCredits: apiService.adjustClientUserCredits.bind(apiService),
+  getClientPaymentSubscriptions: apiService.getClientPaymentSubscriptions.bind(apiService),
+  cancelClientSubscription: apiService.cancelClientSubscription.bind(apiService),
+  getClientPaymentAnalytics: apiService.getClientPaymentAnalytics.bind(apiService)
 };
 
 

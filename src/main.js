@@ -47,8 +47,6 @@ app.use(Toast, {
 
 // Initialize auth on app start (non-blocking)
 const { initializeAuth } = useAuth()
-initializeAuth().catch(err => {
-  console.error('Failed to initialize auth:', err)
-})
+initializeAuth().catch(() => {})
 
 app.mount('#app')

@@ -47,20 +47,24 @@ export default {
       }
     };
 
+    let googleInitialized = false;
+
     onMounted(() => {
-      // Only load Google script once
       if (!window.google?.accounts?.id) {
         const script = document.createElement('script');
         script.src = 'https://accounts.google.com/gsi/client';
         script.async = true;
         script.defer = true;
+        script.onload = () => initGoogle();
         document.body.appendChild(script);
+      } else {
+        initGoogle();
       }
-      setTimeout(initGoogle, 400);
     });
  
     function initGoogle() {
-      if (!window.google || !window.google.accounts) return;
+      if (!window.google?.accounts?.id || googleInitialized) return;
+      googleInitialized = true;
       window.google.accounts.id.initialize({
         client_id: '449350149768-a1a1qn8siakh4hq7tejj60ri81c6hh85.apps.googleusercontent.com',
         callback: handleGoogleCredential,
