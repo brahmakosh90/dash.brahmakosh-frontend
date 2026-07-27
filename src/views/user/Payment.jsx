@@ -404,7 +404,7 @@ export default {
 
         {catalogUserCredits.value != null && (
           <p style={{ margin: '0 0 1rem', fontSize: '0.9rem', color: '#111827' }}>
-            Current balance: <strong>{catalogUserCredits.value}</strong> credits
+            Current balance: <strong>{Math.floor(catalogUserCredits.value)}</strong> credits
           </p>
         )}
 
