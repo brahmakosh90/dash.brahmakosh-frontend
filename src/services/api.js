@@ -1108,6 +1108,13 @@ class ApiService {
     return this.request('/user/payment/by-plan/confirm', { method: 'POST', body: { paymentIntentId } });
   }
 
+  async createUserOneTimeCheckout(planId, successUrl, cancelUrl) {
+    return this.request('/user/payment/by-plan/one-time-checkout', {
+      method: 'POST',
+      body: { planId, successUrl, cancelUrl },
+    });
+  }
+
   async createUserSubscriptionCheckout(planId, successUrl, cancelUrl) {
     return this.request('/user/payment/by-plan/subscription-checkout', {
       method: 'POST',
@@ -1334,6 +1341,7 @@ const api = {
   getUserSubscriptionsList: apiService.getUserSubscriptionsList.bind(apiService),
   createUserPlanPaymentIntent: apiService.createUserPlanPaymentIntent.bind(apiService),
   confirmUserPlanPayment: apiService.confirmUserPlanPayment.bind(apiService),
+  createUserOneTimeCheckout: apiService.createUserOneTimeCheckout.bind(apiService),
   createUserSubscriptionCheckout: apiService.createUserSubscriptionCheckout.bind(apiService),
   claimFreeUserPlan: apiService.claimFreeUserPlan.bind(apiService),
 

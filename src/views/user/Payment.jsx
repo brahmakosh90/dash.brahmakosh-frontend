@@ -173,23 +173,22 @@ export default {
 
     const startCatalogPlanPayment = async (plan) => {
       if (plan.billingType !== 'one_time' || plan.offerPriceMinorUnits < 1) return;
-      loading.value = true;
+      subscribingId.value = plan._id || plan.id;
       error.value = null;
-      success.value = null;
-      clearPaymentForm();
       try {
-        const res = await api.createUserPlanPaymentIntent(plan._id || plan.id);
-        if (!res?.success || !res?.clientSecret) throw new Error(res?.message || 'Failed to create payment');
-        clientSecret.value = res.clientSecret;
-        if (res.publishableKey) publishableKey.value = res.publishableKey;
-        catalogPlanLabel.value = `${plan.name} — ${fmtMoney(res.amountMinorUnits ?? plan.offerPriceMinorUnits, plan.currency)}`;
-        await loadStripe(res.publishableKey || publishableKey.value);
-        await initPayment();
+        const base = window.location.origin + window.location.pathname;
+        const res = await api.createUserOneTimeCheckout(
+          plan._id || plan.id,
+          `${base}?pay=ok`,
+          `${base}?pay=cancel`
+        );
+        if (!res?.success || !res?.checkoutUrl) throw new Error(res?.message || 'Could not start checkout');
+        window.location.href = res.checkoutUrl;
       } catch (e) {
-        console.error('[Payment] catalog intent error', e);
-        error.value = e?.message || 'Failed to initialize payment';
+        console.error('[Payment] one-time checkout error', e);
+        error.value = e?.message || 'Checkout failed';
       } finally {
-        loading.value = false;
+        subscribingId.value = null;
       }
     };
 
@@ -268,8 +267,23 @@ export default {
       const paymentIntentId = params.get('payment_intent');
       const status = params.get('redirect_status');
 
+      if (params.get('pay') === 'ok') {
+        success.value = 'Payment successful! Credits will be added to your account shortly.';
+        window.history.replaceState({}, '', window.location.pathname);
+        const cat = await api.getUserSubscriptionPlansCatalog();
+        if (cat?.success) {
+          catalogPlans.value = cat.data?.plans || [];
+          catalogUserCredits.value = cat.data?.userCredits;
+        }
+        return;
+      }
+      if (params.get('pay') === 'cancel') {
+        error.value = 'Payment was cancelled.';
+        window.history.replaceState({}, '', window.location.pathname);
+        return;
+      }
       if (params.get('sub') === 'ok') {
-        success.value = 'Subscription checkout completed. Credits are added when Stripe confirms payment (usually within a minute).';
+        success.value = 'Subscription activated! Credits are added when Stripe confirms payment (usually within a minute).';
         window.history.replaceState({}, '', window.location.pathname);
         return;
       }
@@ -279,7 +293,7 @@ export default {
         return;
       }
 
-      if (!paymentIntentId || status !== 'succeeded') return;
+      if (!paymentIntentId || status !== 'succeeded') return; // legacy inline payment only
 
       loading.value = true;
       error.value = null;
@@ -492,7 +506,7 @@ export default {
                     {p.billingType === 'one_time' && p.offerPriceMinorUnits > 0 && (
                       <button
                         type="button"
-                        disabled={loading.value}
+                        disabled={subscribingId.value === (p._id || p.id)}
                         onClick={() => startCatalogPlanPayment(p)}
                         style={{
                           marginTop: 'auto',
@@ -502,10 +516,10 @@ export default {
                           background: '#111827',
                           color: '#fff',
                           fontWeight: 600,
-                          cursor: loading.value ? 'wait' : 'pointer',
+                          cursor: subscribingId.value === (p._id || p.id) ? 'wait' : 'pointer',
                         }}
                       >
-                        Pay with Stripe
+                        {subscribingId.value === (p._id || p.id) ? 'Redirecting…' : 'Buy now'}
                       </button>
                     )}
                     {p.billingType === 'recurring' && (
