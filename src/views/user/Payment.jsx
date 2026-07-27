@@ -284,13 +284,14 @@ export default {
       loading.value = true;
       error.value = null;
       try {
-        let res;
-        try {
-          res = await api.confirmUserPlanPayment(paymentIntentId);
-        } catch (_) {
-          // Not a plan payment intent — fall back to legacy top-up confirm
-        }
-        if (!res?.success) {
+        // Try plan confirm first; only fall back to legacy if it's explicitly not a plan intent
+        let res = await api.confirmUserPlanPayment(paymentIntentId).catch(() => null);
+        if (!res?.success && res?.message?.includes('not a plan purchase')) {
+          res = await api.request('/user/payment/confirm', {
+            method: 'POST',
+            body: { paymentIntentId },
+          });
+        } else if (!res?.success && !res) {
           res = await api.request('/user/payment/confirm', {
             method: 'POST',
             body: { paymentIntentId },
