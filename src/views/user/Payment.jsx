@@ -1,4 +1,4 @@
-import { ref, onMounted, computed, nextTick } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import api from '../../services/api.js';
 
 const currencySymbol = (c) => ({ INR: '₹', USD: '$', AED: 'AED ' }[c] || '');
@@ -7,165 +7,46 @@ const fmtMoney = (minor, c) => `${currencySymbol(c)}${(Number(minor) / 100).toFi
 export default {
   name: 'UserPayment',
   setup() {
-    const amount = ref('');
     const loading = ref(false);
-    const paying = ref(false);
-    const elementReady = ref(false);
     const error = ref(null);
     const success = ref(null);
-    const clientSecret = ref(null);
-    const stripeInstance = ref(null);
-    const elementsInstance = ref(null);
-    const paymentElement = ref(null);
-    const paymentMountEl = ref(null);
-    let stripePromise = null;
-
-    /** 'legacy' = custom INR top-up; 'catalog' = per-client plan PaymentIntent */
     const mainTab = ref('catalog');
     const catalogPlans = ref([]);
     const catalogUserCredits = ref(null);
     const loadingCatalog = ref(false);
-    const catalogPlanLabel = ref('');
     const subscribingId = ref(null);
 
-    const amountNum = computed(() => parseFloat(amount.value) || 0);
-
-    const publishableKey = ref('');
+    // Legacy INR top-up
     const minAmountUnits = ref(500);
     const creditsPerUnit = ref(2);
     const legacyPlans = ref([]);
     const selectedPlanAmount = ref(null);
-    const loadingPlans = ref(false);
+    const customAmount = ref('');
 
-    const effectiveAmount = computed(() => {
-      if (selectedPlanAmount.value) return selectedPlanAmount.value;
-      return amountNum.value;
-    });
-
+    const effectiveAmount = computed(() => selectedPlanAmount.value || parseFloat(customAmount.value) || 0);
     const creditsDisplay = computed(() => {
       const amt = effectiveAmount.value;
-      if (!amt || amt <= 0) return '—';
-      return Math.floor(amt * creditsPerUnit.value);
+      return amt > 0 ? Math.floor(amt * creditsPerUnit.value) : '—';
     });
+    const canPay = computed(() => effectiveAmount.value >= minAmountUnits.value && !loading.value);
 
-    const canPay = computed(() => effectiveAmount.value >= minAmountUnits.value && !paying.value);
-    const canSubmitPayment = computed(
-      () =>
-        !!clientSecret.value &&
-        !!stripeInstance.value &&
-        !!elementsInstance.value &&
-        !!paymentElement.value &&
-        !!paymentMountEl.value &&
-        elementReady.value &&
-        !paying.value
-    );
-    const methodChoice = ref('auto');
-
-    const loadStripe = async (pk) => {
-      const key = pk || publishableKey.value || import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '';
-      if (!key) return null;
-      stripePromise = null;
-      const { loadStripe: load } = await import('@stripe/stripe-js');
-      stripePromise = load(key);
-      return stripePromise;
-    };
-
-    const clearPaymentForm = () => {
-      clientSecret.value = null;
-      elementReady.value = false;
-      catalogPlanLabel.value = '';
-      if (paymentElement.value) {
-        try {
-          paymentElement.value.unmount();
-        } catch (_) {}
-      }
-      paymentElement.value = null;
-      elementsInstance.value = null;
-    };
-
-    const initPayment = async () => {
-      if (!clientSecret.value) return;
-      error.value = null;
-      elementReady.value = false;
-      try {
-        await nextTick();
-        await new Promise((r) => requestAnimationFrame(r));
-
-        if (!paymentMountEl.value) {
-          throw new Error('Payment form container not ready. Please try again.');
-        }
-
-        if (paymentElement.value) {
-          try {
-            paymentElement.value.unmount();
-          } catch (_) {}
-          paymentElement.value = null;
-        }
-        elementsInstance.value = null;
-
-        const stripe = await loadStripe(publishableKey.value);
-        if (!stripe) {
-          error.value = 'Stripe not configured. Missing publishable key from backend.';
-          return;
-        }
-        stripeInstance.value = stripe;
-
-        let paymentMethodOrder;
-        if (methodChoice.value === 'wallet') {
-          paymentMethodOrder = ['apple_pay', 'google_pay', 'link', 'card'];
-        } else if (methodChoice.value === 'card') {
-          paymentMethodOrder = ['card', 'apple_pay', 'google_pay', 'link'];
-        }
-
-        const elements = stripe.elements({
-          clientSecret: clientSecret.value,
-          appearance: { theme: 'stripe' },
-        });
-        elementsInstance.value = elements;
-        const paymentElementOpts = {
-          layout: 'tabs',
-          ...(paymentMethodOrder ? { paymentMethodOrder } : {}),
-        };
-        const paymentEl = elements.create('payment', paymentElementOpts);
-        paymentEl.on('ready', () => {
-          elementReady.value = true;
-        });
-        paymentEl.on('loaderror', (evt) => {
-          console.error('[Payment] Payment Element loaderror', evt);
-          elementReady.value = false;
-          error.value = evt?.error?.message || 'Failed to load payment form (Stripe session error)';
-        });
-        paymentEl.mount(paymentMountEl.value);
-        paymentElement.value = paymentEl;
-      } catch (e) {
-        console.error('[Payment] initPayment error', e);
-        error.value = e?.message || 'Failed to initialize payment form';
-        elementReady.value = false;
-      }
-    };
-
-    const createIntent = async () => {
+    const startLegacyCheckout = async () => {
       if (!canPay.value) return;
       loading.value = true;
       error.value = null;
-      success.value = null;
-      clearPaymentForm();
       try {
-        const body = selectedPlanAmount.value ? { planAmount: selectedPlanAmount.value } : { amount: amountNum.value };
-
-        const res = await api.request('/user/payment/create-intent', {
+        const base = window.location.origin + window.location.pathname;
+        const body = selectedPlanAmount.value
+          ? { planAmount: selectedPlanAmount.value }
+          : { amount: parseFloat(customAmount.value) };
+        const res = await api.request('/user/payment/legacy-checkout', {
           method: 'POST',
-          body,
+          body: { ...body, successUrl: `${base}?pay=ok`, cancelUrl: `${base}?pay=cancel` },
         });
-        if (!res?.success || !res?.clientSecret) throw new Error(res?.message || 'Failed to create payment');
-        clientSecret.value = res.clientSecret;
-        if (res.publishableKey) publishableKey.value = res.publishableKey;
-        catalogPlanLabel.value = `Pay ₹${Number(effectiveAmount.value || 0).toFixed(0)}`;
-        await loadStripe(res.publishableKey || publishableKey.value);
-        await initPayment();
+        if (!res?.success || !res?.checkoutUrl) throw new Error(res?.message || 'Failed to start checkout');
+        window.location.href = res.checkoutUrl;
       } catch (e) {
-        console.error('[Payment] createIntent error', e);
-        error.value = e?.message || 'Failed to initialize payment';
+        error.value = e?.message || 'Checkout failed';
       } finally {
         loading.value = false;
       }
@@ -332,24 +213,17 @@ export default {
 
     const loadConfigAndPlans = async () => {
       try {
-        loadingPlans.value = true;
         const [configRes, plansRes] = await Promise.all([
           api.request('/user/payment/config', { method: 'GET' }),
           api.request('/user/payment/plans', { method: 'GET' }),
         ]);
-
-        if (configRes?.success) {
-          if (configRes.minAmountUnits) minAmountUnits.value = configRes.minAmountUnits;
-        }
-
+        if (configRes?.success && configRes.minAmountUnits) minAmountUnits.value = configRes.minAmountUnits;
         if (plansRes?.success) {
           creditsPerUnit.value = plansRes.data?.creditsPerUnit || creditsPerUnit.value;
           legacyPlans.value = Array.isArray(plansRes.data?.plans) ? plansRes.data.plans : [];
         }
       } catch (e) {
         console.error('[Payment] loadConfigAndPlans error', e);
-      } finally {
-        loadingPlans.value = false;
       }
     };
 
@@ -548,213 +422,74 @@ export default {
           </div>
         )}
 
-        {(clientSecret.value || mainTab.value === 'legacy') && (
+        {mainTab.value === 'legacy' && (
           <div style={{ ...card, padding: '1.5rem' }}>
-            {mainTab.value === 'legacy' && (
-              <>
-                <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
-                  {['auto', 'wallet', 'card'].map((mode) => {
-                    const labels = {
-                      auto: 'Auto (Stripe)',
-                      wallet: 'Apple / Google Pay',
-                      card: 'Card only',
-                    };
-                    const active = methodChoice.value === mode;
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => {
-                          methodChoice.value = mode;
-                          if (clientSecret.value && mainTab.value === 'legacy') {
-                            if (paymentElement.value) {
-                              try {
-                                paymentElement.value.unmount();
-                              } catch (_) {}
-                              paymentElement.value = null;
-                            }
-                            initPayment();
-                          }
-                        }}
-                        style={{
-                          flex: 1,
-                          padding: '0.4rem 0.5rem',
-                          borderRadius: '999px',
-                          border: active ? '1px solid #111827' : '1px solid #d1d5db',
-                          background: active ? '#111827' : '#f9fafb',
-                          color: active ? '#ffffff' : '#374151',
-                          fontSize: '0.75rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {labels[mode]}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
-                  {legacyPlans.value.map((p) => {
-                    const active = selectedPlanAmount.value === p.amount;
-                    return (
-                      <button
-                        key={p.amount}
-                        type="button"
-                        onClick={() => {
-                          selectedPlanAmount.value = p.amount;
-                          amount.value = String(p.amount);
-                        }}
-                        style={{
-                          padding: '0.75rem 0.9rem',
-                          borderRadius: '10px',
-                          border: active ? '1px solid #111827' : '1px solid #e5e7eb',
-                          background: active ? '#111827' : '#f9fafb',
-                          color: active ? '#ffffff' : '#111827',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>₹{p.amount}</div>
-                        <div style={{ fontSize: '0.75rem', color: active ? '#e5e7eb' : '#6b7280' }}>{p.credits} credits</div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '0.5rem' }}>
-                  Custom amount (₹)
-                </label>
-                <input
-                  type="number"
-                  min={minAmountUnits.value}
-                  step="1"
-                  value={amount.value}
-                  onInput={(e) => {
-                    amount.value = e.target.value;
-                    selectedPlanAmount.value = null;
-                  }}
-                  placeholder={`e.g. ${minAmountUnits.value}`}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
-                    border: '1px solid #d1d5db',
-                    fontSize: '1rem',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <p style={{ margin: '0.5rem 0 1rem', fontSize: '0.8rem', color: '#6b7280' }}>
-                  1 ₹ = {creditsPerUnit.value} credits. You will receive <strong>{creditsDisplay.value}</strong> credits. Min ₹
-                  {minAmountUnits.value}.
-                </p>
-              </>
-            )}
-
-            {mainTab.value === 'legacy' && !clientSecret.value && (
-              <button
-                disabled={!canPay.value || loading.value}
-                onClick={createIntent}
-                style={{
-                  width: '100%',
-                  padding: '0.85rem 1.25rem',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: canPay.value && !loading.value ? '#111827' : '#9ca3af',
-                  color: 'white',
-                  fontSize: '1rem',
-                  fontWeight: 600,
-                  cursor: canPay.value && !loading.value ? 'pointer' : 'not-allowed',
-                }}
-              >
-                {loading.value ? 'Loading...' : 'Continue to payment'}
-              </button>
-            )}
-
-            {clientSecret.value && (
-              <>
-                {mainTab.value === 'catalog' && catalogPlanLabel.value && (
-                  <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: '#374151' }}>{catalogPlanLabel.value}</p>
-                )}
-                <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
-                  {['auto', 'wallet', 'card'].map((mode) => {
-                    const labels = {
-                      auto: 'Auto',
-                      wallet: 'Wallets',
-                      card: 'Card',
-                    };
-                    const active = methodChoice.value === mode;
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => {
-                          methodChoice.value = mode;
-                          if (paymentElement.value) {
-                            try {
-                              paymentElement.value.unmount();
-                            } catch (_) {}
-                            paymentElement.value = null;
-                          }
-                          initPayment();
-                        }}
-                        style={{
-                          flex: 1,
-                          padding: '0.35rem 0.5rem',
-                          borderRadius: '999px',
-                          border: active ? '1px solid #111827' : '1px solid #d1d5db',
-                          background: active ? '#111827' : '#f9fafb',
-                          color: active ? '#ffffff' : '#374151',
-                          fontSize: '0.72rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {labels[mode]}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div ref={paymentMountEl} style={{ marginBottom: '1rem' }} />
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <h2 style={{ margin: '0 0 1rem', fontSize: '1.1rem', fontWeight: 700 }}>Top up with INR</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+              {legacyPlans.value.map((p) => {
+                const active = selectedPlanAmount.value === p.amount;
+                return (
                   <button
-                    onClick={() => {
-                      clearPaymentForm();
-                      error.value = null;
-                    }}
+                    key={p.amount}
+                    type="button"
+                    onClick={() => { selectedPlanAmount.value = p.amount; customAmount.value = ''; }}
                     style={{
-                      flex: 1,
-                      padding: '0.85rem',
+                      padding: '0.75rem 0.9rem',
                       borderRadius: '10px',
-                      border: '1px solid #d1d5db',
-                      background: '#fff',
-                      color: '#374151',
-                      fontSize: '0.95rem',
-                      fontWeight: 600,
+                      border: active ? '1px solid #111827' : '1px solid #e5e7eb',
+                      background: active ? '#111827' : '#f9fafb',
+                      color: active ? '#fff' : '#111827',
+                      textAlign: 'left',
                       cursor: 'pointer',
                     }}
                   >
-                    Cancel
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>₹{p.amount}</div>
+                    <div style={{ fontSize: '0.75rem', color: active ? '#e5e7eb' : '#6b7280' }}>{p.credits} credits</div>
                   </button>
-                  <button
-                    disabled={!canSubmitPayment.value}
-                    onClick={handleSubmit}
-                    style={{
-                      flex: 1,
-                      padding: '0.85rem 1.25rem',
-                      borderRadius: '10px',
-                      border: 'none',
-                      background: canSubmitPayment.value ? '#111827' : '#9ca3af',
-                      color: 'white',
-                      fontSize: '0.95rem',
-                      fontWeight: 600,
-                      cursor: canSubmitPayment.value ? 'pointer' : 'not-allowed',
-                    }}
-                  >
-                    {paying.value ? 'Processing…' : mainTab.value === 'catalog' ? 'Pay now' : `Pay ₹${Number(effectiveAmount.value || 0).toFixed(0)}`}
-                  </button>
-                </div>
-              </>
-            )}
+                );
+              })}
+            </div>
+            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '0.4rem' }}>
+              Or enter custom amount (₹)
+            </label>
+            <input
+              type="number"
+              min={minAmountUnits.value}
+              step="1"
+              value={customAmount.value}
+              onInput={(e) => { customAmount.value = e.target.value; selectedPlanAmount.value = null; }}
+              placeholder={`Min ₹${minAmountUnits.value}`}
+              style={{
+                width: '100%',
+                padding: '0.75rem 1rem',
+                borderRadius: '10px',
+                border: '1px solid #d1d5db',
+                fontSize: '1rem',
+                boxSizing: 'border-box',
+                marginBottom: '0.5rem',
+              }}
+            />
+            <p style={{ margin: '0 0 1rem', fontSize: '0.8rem', color: '#6b7280' }}>
+              1 ₹ = {creditsPerUnit.value} credits &mdash; you will receive <strong>{creditsDisplay.value}</strong> credits
+            </p>
+            <button
+              type="button"
+              disabled={!canPay.value}
+              onClick={startLegacyCheckout}
+              style={{
+                width: '100%',
+                padding: '0.85rem',
+                borderRadius: '10px',
+                border: 'none',
+                background: canPay.value ? '#111827' : '#9ca3af',
+                color: '#fff',
+                fontSize: '1rem',
+                fontWeight: 600,
+                cursor: canPay.value ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {loading.value ? 'Redirecting…' : `Pay ₹${effectiveAmount.value > 0 ? effectiveAmount.value : ''} via Stripe`}
+            </button>
           </div>
         )}
       </div>
