@@ -698,6 +698,36 @@ const routes = [
         component: () => import('../views/client/tools/geeta/GeetaShlokaManagement.jsx')
       },
       {
+        path: 'tools/shiv-puran',
+        name: 'ShivPuranManagement',
+        component: () => import('../views/client/tools/shivpuran/ShivPuranManagement.jsx')
+      },
+      {
+        path: 'tools/shiv-puran/:partId/verses',
+        name: 'ShivPuranVerseManagement',
+        component: () => import('../views/client/tools/shivpuran/ShivPuranVerseManagement.jsx')
+      },
+      {
+        path: 'tools/ramayana',
+        name: 'RamayanaManagement',
+        component: () => import('../views/client/tools/ramayana/RamayanaManagement.jsx')
+      },
+      {
+        path: 'tools/ramayana/:kandaId/verses',
+        name: 'RamayanaVerseManagement',
+        component: () => import('../views/client/tools/ramayana/RamayanaVerseManagement.jsx')
+      },
+      {
+        path: 'tools/durga-saptashati',
+        name: 'DurgaSaptashatiManagement',
+        component: () => import('../views/client/tools/durgasaptashati/DurgaSaptashatiManagement.jsx')
+      },
+      {
+        path: 'tools/durga-saptashati/:chapterId/verses',
+        name: 'DurgaSaptashatiVerseManagement',
+        component: () => import('../views/client/tools/durgasaptashati/DurgaSaptashatiVerseManagement.jsx')
+      },
+      {
         path: 'sankalp',
         name: 'ClientSankalp',
         component: () => import('../views/client/Sankalp.jsx')

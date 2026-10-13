@@ -177,6 +177,33 @@ export default {
         route: '/client/swapna-decoder',
         color: '#6366f1',
         category: 'Spiritual'
+      },
+      { 
+        id: 18, 
+        name: 'शिव पुराण (Shiv Puran)', 
+        icon: BookOpenIcon, 
+        description: 'Manage Shiv Puran chapters and sacred stories of Lord Shiva', 
+        route: '/client/tools/shiv-puran',
+        color: '#1e40af',
+        category: 'Spiritual'
+      },
+      { 
+        id: 19, 
+        name: 'रामायण (Ramayana)', 
+        icon: BookOpenIcon, 
+        description: 'Manage Ramayana kandas and sacred verses of Lord Ram', 
+        route: '/client/tools/ramayana',
+        color: '#b45309',
+        category: 'Spiritual'
+      },
+      { 
+        id: 20, 
+        name: 'दुर्गा सप्तशती (Durga Saptashati)', 
+        icon: BookOpenIcon, 
+        description: 'Manage Durga Saptashati chapters and sacred verses of Maa Durga', 
+        route: '/client/tools/durga-saptashati',
+        color: '#be123c',
+        category: 'Spiritual'
       }
     ];
 
