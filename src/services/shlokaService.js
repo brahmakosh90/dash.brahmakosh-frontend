@@ -43,7 +43,10 @@ export const shlokaService = {
   createShloka: async (shlokaData) => {
     try {
       const api = createAuthAxios();
-      const response = await api.post('/', shlokaData);
+      const isFormData = shlokaData instanceof FormData;
+      const response = await api.post('/', shlokaData, {
+        headers: isFormData ? { 'Content-Type': undefined } : {}
+      });
       return response.data;
     } catch (error) {
       console.error('Error creating shloka:', error);
@@ -55,7 +58,10 @@ export const shlokaService = {
   updateShloka: async (id, shlokaData) => {
     try {
       const api = createAuthAxios();
-      const response = await api.put(`/${id}`, shlokaData);
+      const isFormData = shlokaData instanceof FormData;
+      const response = await api.put(`/${id}`, shlokaData, {
+        headers: isFormData ? { 'Content-Type': undefined } : {}
+      });
       return response.data;
     } catch (error) {
       console.error('Error updating shloka:', error);

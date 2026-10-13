@@ -89,7 +89,8 @@ export default {
       explanation: '',
       tags: '',
       status: 'draft',
-      isActive: true
+      isActive: true,
+      audioFile: null
     });
 
     const editForm = ref({
@@ -105,7 +106,8 @@ export default {
       explanation: '',
       tags: '',
       status: 'draft',
-      isActive: true
+      isActive: true,
+      audioFile: null
     });
 
     const filteredShlokas = () => {
@@ -209,14 +211,22 @@ export default {
         updateShlokaIndex();
         
         const { shlokaService } = await import('../../../../services/shlokaService.js');
-        const response = await shlokaService.createShloka(shlokaForm.value);
+
+        const formData = new FormData();
+        Object.entries(shlokaForm.value).forEach(([key, val]) => {
+          if (key === 'audioFile') {
+            if (val) formData.append('audio', val);
+          } else {
+            formData.append(key, val);
+          }
+        });
+
+        const response = await shlokaService.createShloka(formData);
         
         if (response.success) {
-          shlokas.value.push(response.data);
           toast.success('✓ Shloka created successfully!');
           showShlokaModal.value = false;
-          
-          // Reload shlokas with current filter
+          shlokaForm.value.audioFile = null;
           await loadShlokas(selectedChapterNumber.value || null);
         } else {
           toast.error(response.message || '❌ Failed to create shloka');
@@ -253,15 +263,24 @@ export default {
         toast.info('Updating shloka...');
         
         const { shlokaService } = await import('../../../../services/shlokaService.js');
-        const response = await shlokaService.updateShloka(editingShloka.value._id, editForm.value);
+
+        const formData = new FormData();
+        Object.entries(editForm.value).forEach(([key, val]) => {
+          if (key === 'audioFile') {
+            if (val) formData.append('audio', val);
+          } else if (key !== '_id') {
+            formData.append(key, val);
+          }
+        });
+
+        const response = await shlokaService.updateShloka(editingShloka.value._id, formData);
         
         if (response.success) {
           const index = shlokas.value.findIndex(s => s._id === editingShloka.value._id);
-          if (index !== -1) {
-            shlokas.value[index] = response.data;
-          }
+          if (index !== -1) shlokas.value[index] = response.data;
           toast.success('✓ Shloka updated successfully!');
           showEditModal.value = false;
+          editForm.value.audioFile = null;
         } else {
           toast.error(response.message || '❌ Failed to update shloka');
         }
@@ -822,6 +841,16 @@ export default {
                           ))}
                         </div>
                       )}
+
+                      {/* Audio Player */}
+                      {shloka.audioUrl && (
+                        <div class="mt-3">
+                          <h6 class="text-muted mb-2" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🎵 Audio:</h6>
+                          <audio controls class="w-100" style={{ height: '36px' }}>
+                            <source src={shloka.audioUrl} />
+                          </audio>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1028,6 +1057,16 @@ export default {
                               <option value="true">Active</option>
                               <option value="false">Inactive</option>
                             </select>
+                          </div>
+                          <div class="col-12">
+                            <label class="form-label fw-semibold">🎵 Audio File (Optional)</label>
+                            <input
+                              type="file"
+                              class="form-control"
+                              accept="audio/*"
+                              onChange={(e) => shlokaForm.value.audioFile = e.target.files[0] || null}
+                            />
+                            <div class="form-text">Max 20MB. MP3, WAV, OGG supported.</div>
                           </div>
                         </div>
                       </form>
@@ -1238,6 +1277,24 @@ export default {
                               <option value="false">Inactive</option>
                             </select>
                           </div>
+                          <div class="col-12">
+                            <label class="form-label fw-semibold">🎵 Audio File (Optional)</label>
+                            {editForm.value.audioUrl && (
+                              <div class="mb-2">
+                                <small class="text-muted">Current audio:</small>
+                                <audio controls class="w-100 mt-1" style={{ height: '36px' }}>
+                                  <source src={editForm.value.audioUrl} />
+                                </audio>
+                              </div>
+                            )}
+                            <input
+                              type="file"
+                              class="form-control"
+                              accept="audio/*"
+                              onChange={(e) => editForm.value.audioFile = e.target.files[0] || null}
+                            />
+                            <div class="form-text">Upload new audio to replace existing. Max 20MB.</div>
+                          </div>
                         </div>
                       </form>
                     </div>
@@ -1332,6 +1389,15 @@ export default {
                               <span key={index} class="badge bg-primary">{tag.trim()}</span>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {selectedShloka.value.audioUrl && (
+                        <div class="mb-3">
+                          <h6 class="fw-semibold mb-2 small text-muted">🎵 Audio</h6>
+                          <audio controls class="w-100">
+                            <source src={selectedShloka.value.audioUrl} />
+                          </audio>
                         </div>
                       )}
                     </div>
