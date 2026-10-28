@@ -44,7 +44,7 @@ export default {
             <Tabs modelValue={tab.value} onChange={(v) => (tab.value = v)} options={[['all', 'All', counts.value.all], ['pending', 'Applications', counts.value.pending], ['approved', 'Approved', counts.value.approved], ['suspended', 'Suspended', counts.value.suspended], ['rejected', 'Rejected', counts.value.rejected]]} />
             <div class="pp-toolbar"><SearchBox modelValue={q.value} onChange={(v) => (q.value = v)} placeholder="Search name, organisation, code" /></div>
             <DataTable rows={rows.value} pageSize={10} columns={[
-              { label: 'Partner', render: (p) => <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}><Avatar text={p.initials} size={34} /><div class="pp-cell-main"><b>{p.name}</b><small>{p.org}{p.country ? ` · ${p.country}` : ''}{p.status === 'pending' && p.audience ? ` · ${p.audience}` : ''}</small></div></div> },
+              { label: 'Partner', render: (p) => <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}><Avatar text={p.initials} size={34} /><div class="pp-cell-main"><b>{p.name}</b><small>{p.org}{[p.city, p.state, p.country].filter(Boolean).length ? ` · ${[p.city, p.state, p.country].filter(Boolean).join(', ')}` : ''}</small></div></div> },
               { label: 'Status', render: (p) => <Badge status={p.status} /> },
               { label: 'Code', render: (p) => (p.code ? <span class="pp-chip">{p.code}</span> : '—') },
               { label: 'Registrations', align: 'r', render: (p) => num(p.s.regs) }, { label: 'Conv.', align: 'r', render: (p) => pct(p.s.conv) },
@@ -58,8 +58,7 @@ export default {
                 default: () => (
                   <div class="pp-grid pp-g2">
                     <dl class="pp-kv" style={{ gridTemplateColumns: '120px 1fr' }}>
-                      <dt>Organisation</dt><dd>{sel.value.org || '—'}</dd><dt>Email</dt><dd>{sel.value.email}</dd><dt>Phone</dt><dd>{sel.value.phone || '—'}</dd><dt>Country</dt><dd>{sel.value.country || '—'}</dd>
-                      <dt>Audience</dt><dd>{sel.value.audience || '—'}</dd><dt>Status</dt><dd><Badge status={sel.value.status} /></dd><dt>{sel.value.status === 'pending' ? 'Applied' : 'Joined'}</dt><dd>{fmtDate(sel.value.status === 'pending' ? sel.value.appliedAt : sel.value.joinedAt)}</dd>
+                      <dt>Organisation</dt><dd>{sel.value.org || '—'}</dd><dt>Email</dt><dd>{sel.value.email}</dd><dt>Phone</dt><dd>{sel.value.phone || '—'}</dd><dt>Location</dt><dd>{[sel.value.city, sel.value.state, sel.value.country].filter(Boolean).join(', ') || '—'}</dd><dt>Status</dt><dd><Badge status={sel.value.status} /></dd><dt>{sel.value.status === 'pending' ? 'Applied' : 'Joined'}</dt><dd>{fmtDate(sel.value.status === 'pending' ? sel.value.appliedAt : sel.value.joinedAt)}</dd>
                     </dl>
                     <div class="pp-stack">
                       <dl class="pp-kv" style={{ gridTemplateColumns: '1fr auto' }}>
