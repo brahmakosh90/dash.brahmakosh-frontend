@@ -7,8 +7,11 @@ import ClientLayout from '../layouts/ClientLayout.jsx';
 import DashboardLayout from '../layouts/DashboardLayout.jsx';
 import MobileUserLayout from '../layouts/MobileUserLayout.jsx';
 import SuperAdminLayout from '../layouts/SuperAdminLayout.jsx';
+import { portalRoutes, portalGuard } from '../portal/routes.js';
 
 const routes = [
+  // Referral Partner Portal (self-contained module in src/portal)
+  ...portalRoutes,
   {
     path: '/',
     redirect: '/user/login'
@@ -888,6 +891,7 @@ const getRoleFromPath = (path) => {
   if (path.startsWith('/super-admin')) return 'super_admin';
   if (path.startsWith('/admin')) return 'admin';
   if (path.startsWith('/client')) return 'client';
+  if (path.startsWith('/partner-portal')) return null; // standalone module, no legacy auth
   if (path.startsWith('/partner')) return 'partner';
   if (path.startsWith('/mobile/user')) return 'user'; // Check mobile/user before /user
   if (path.startsWith('/user')) return 'user';
@@ -926,6 +930,8 @@ const isRoleAuthenticated = (role) => {
 };
 
 // Navigation guards
+router.beforeEach(portalGuard);
+
 router.beforeEach(async (to, from, next) => {
   const { initializeAuth, getCurrentRole, getTokenForRole } = useAuth();
   
