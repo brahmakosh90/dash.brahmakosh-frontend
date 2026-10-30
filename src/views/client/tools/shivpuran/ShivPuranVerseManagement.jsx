@@ -152,7 +152,6 @@ export default {
       activeDropdown.value = null;
     };
 
-    const truncate = (text, n = 100) => !text || text.length <= n ? text : text.substring(0, n) + '...';
 
     onMounted(fetchVerses);
 
@@ -367,14 +366,14 @@ export default {
                           style={{ background: 'linear-gradient(135deg, #fff3e0, #ffe0b2)', border: '1px solid #ffcc02' }}>
                           <p class="mb-0 text-center"
                             style={{ fontFamily: 'serif', fontSize: '1rem', color: '#e65100', fontWeight: '500' }}>
-                            {truncate(verse.sanskrit, 120)}
+                            {verse.sanskrit}
                           </p>
                         </div>
 
                         {/* Transliteration */}
                         {verse.transliteration && (
-                          <p class="text-muted mb-2" style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>
-                            {truncate(verse.transliteration, 80)}
+                          <p class="text-muted mb-2" style={{ fontSize: '0.8rem', fontStyle: 'italic', whiteSpace: 'pre-line', wordBreak: 'break-word' }}>
+                            {verse.transliteration}
                           </p>
                         )}
 
@@ -382,7 +381,7 @@ export default {
                         {verse.hindi && (
                           <div class="mb-2">
                             <small class="text-muted fw-semibold">हिंदी: </small>
-                            <small class="text-dark">{truncate(verse.hindi, 80)}</small>
+                            <small class="text-dark" style={{ whiteSpace: 'pre-line' }}>{verse.hindi}</small>
                           </div>
                         )}
 
@@ -390,7 +389,7 @@ export default {
                         {verse.english && (
                           <div class="mb-2">
                             <small class="text-muted fw-semibold">English: </small>
-                            <small class="text-dark">{truncate(verse.english, 80)}</small>
+                            <small class="text-dark" style={{ whiteSpace: 'pre-line' }}>{verse.english}</small>
                           </div>
                         )}
 

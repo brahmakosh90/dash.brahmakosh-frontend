@@ -147,7 +147,6 @@ export default {
       activeDropdown.value = null;
     };
 
-    const truncate = (text, n = 100) => !text || text.length <= n ? text : text.substring(0, n) + '...';
 
     onMounted(fetchVerses);
 
@@ -352,26 +351,26 @@ export default {
                         <div class="p-2 rounded mb-2"
                           style={{ background: 'linear-gradient(135deg, #fff1f2, #fecdd3)', border: `1px solid ${COLOR}40` }}>
                           <p class="mb-0 text-center"
-                            style={{ fontFamily: 'serif', fontSize: '1rem', color: COLOR, fontWeight: '500' }}>
-                            {truncate(verse.sanskrit, 120)}
+                            style={{ fontFamily: 'serif', fontSize: '1rem', color: COLOR, fontWeight: '500', whiteSpace: 'pre-line', wordBreak: 'break-word' }}>
+                            {verse.sanskrit}
                           </p>
                         </div>
 
                         {verse.transliteration && (
-                          <p class="text-muted mb-2" style={{ fontSize: '0.8rem', fontStyle: 'italic' }}>
-                            {truncate(verse.transliteration, 80)}
+                          <p class="text-muted mb-2" style={{ fontSize: '0.8rem', fontStyle: 'italic', whiteSpace: 'pre-line', wordBreak: 'break-word' }}>
+                            {verse.transliteration}
                           </p>
                         )}
                         {verse.hindi && (
                           <div class="mb-2">
                             <small class="text-muted fw-semibold">हिंदी: </small>
-                            <small class="text-dark">{truncate(verse.hindi, 80)}</small>
+                            <small class="text-dark" style={{ whiteSpace: 'pre-line' }}>{verse.hindi}</small>
                           </div>
                         )}
                         {verse.english && (
                           <div class="mb-2">
                             <small class="text-muted fw-semibold">English: </small>
-                            <small class="text-dark">{truncate(verse.english, 80)}</small>
+                            <small class="text-dark" style={{ whiteSpace: 'pre-line' }}>{verse.english}</small>
                           </div>
                         )}
                         {verse.audioUrl && (
