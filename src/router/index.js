@@ -168,14 +168,9 @@ const routes = [
         component: () => import('../views/mobile/MobileChatPage.jsx')
       },
       {
-        path: 'voice',
-        name: 'MobileVoicePage',
-        component: () => import('../views/mobile/MobileVoicePage.jsx')
-      },
-      {
-        path: 'realtime-agent',
-        name: 'RealTimeAgent',
-        component: () => import('../views/mobile/RealTimeAgent.jsx')
+        path: 'rasmi-ai',
+        name: 'RasmiAI',
+        component: () => import('../views/mobile/RasmiAI.jsx')
       },
       {
         path: 'activities',

@@ -3,7 +3,6 @@ import { useAuth } from '../../store/auth.js';
 import { useRouter } from 'vue-router';
 import { 
   ChatBubbleLeftRightIcon, 
-  MicrophoneIcon, 
   UserIcon, 
   FilmIcon,
   ArrowRightIcon,
@@ -33,14 +32,6 @@ export default {
         description: 'Start a conversation with AI using text messages',
         route: '/mobile/user/chat',
         color: '#10b981'
-      },
-      {
-        id: 3,
-        name: 'Voice Chat',
-        icon: MicrophoneIcon,
-        description: 'Have a voice-to-voice conversation with AI',
-        route: '/mobile/user/voice',
-        color: '#8b5cf6'
       },
       {
         id: 4,

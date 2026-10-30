@@ -59,8 +59,7 @@ export default {
     const activePage = computed(() => {
       const path = router.currentRoute.value.path;
       if (path.includes('/chat')) return 'chat';
-      if (path.includes('/voice')) return 'voice';
-      if (path.includes('/realtime-agent')) return 'realtime-agent';
+      if (path.includes('/rasmi-ai')) return 'rasmi-ai';
       if (path.includes('/activities')) return 'activities';
       if (path.includes('/meditate') || path.includes('/pray') || path.includes('/chant') || path.includes('/silence')) return 'activities';
       if (path.includes('/spiritual-stats')) return 'spiritual-stats';
@@ -89,10 +88,8 @@ export default {
         router.push('/mobile/user/dashboard');
       } else if (page === 'chat') {
         router.push('/mobile/user/chat');
-      } else if (page === 'voice') {
-        router.push('/mobile/user/voice');
-      } else if (page === 'realtime-agent') {
-        router.push('/mobile/user/realtime-agent');
+      } else if (page === 'rasmi-ai') {
+        router.push('/mobile/user/rasmi-ai');
       } else if (page === 'activities') {
         router.push('/mobile/user/activities');
       } else if (page === 'spiritual-stats') {
@@ -226,8 +223,7 @@ export default {
               { id: 'profile', label: 'Profile', icon: UserIcon },
               { id: 'payment', label: 'Payment', icon: CreditCardIcon },
               { id: 'chat', label: 'Chat', icon: ChatBubbleLeftRightIcon },
-              { id: 'voice', label: 'Voice', icon: MicrophoneIcon },
-              { id: 'realtime-agent', label: 'Real Time Agent', icon: CpuChipIcon },
+              { id: 'rasmi-ai', label: 'Rasmi AI', icon: SparklesIcon },
               { id: 'user-chat', label: 'User Chat', icon: ChatBubbleLeftRightIcon },
               { id: 'voice-call', label: 'Voice Call', icon: MicrophoneIcon }
             ].map(item => (
