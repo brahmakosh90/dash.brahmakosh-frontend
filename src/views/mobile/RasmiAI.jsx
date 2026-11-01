@@ -632,6 +632,7 @@ export default {
             type: 'start',
             token,
             chatId: 'new',
+            language: 'hi',
             ...(target.agentId ? { agentId: target.agentId } : {}),
             voiceName: target.voiceName
           })

@@ -100,9 +100,24 @@ export default {
     const previewFile = ref(null);
     const searchQuery = ref('');
 
+    const r2Error = ref(null);
+    const isS3OnlyMode = ref(false);
+
+    const checkStorageModeAndFetch = async () => {
+      try {
+        const res = await api.request('/client/settings/storage-mode');
+        if (res?.data?.storageMode === 's3_only') {
+          isS3OnlyMode.value = true;
+          return;
+        }
+      } catch (e) { /* ignore, proceed to fetch */ }
+      fetchFiles();
+    };
+
     const fetchFiles = async (cursor = null) => {
       try {
         loading.value = true;
+        r2Error.value = null;
         const params = new URLSearchParams({ limit: 200 });
         if (prefix.value) params.append('prefix', prefix.value);
         if (cursor) params.append('cursor', cursor);
@@ -112,9 +127,16 @@ export default {
           counts.value = res.data.counts || {};
           nextCursor.value = res.data.nextCursor;
           isTruncated.value = res.data.isTruncated;
+        } else {
+          r2Error.value = res?.message || 'Failed to load R2 files';
         }
       } catch (e) {
-        toast.error(e?.message || 'Failed to load R2 files');
+        const msg = e?.responseData?.message || e?.message || '';
+        if (e?.responseData?.storageMode === 's3_only' || msg.includes('S3 Only')) {
+          isS3OnlyMode.value = true;
+        } else {
+          r2Error.value = msg || 'Failed to load R2 files';
+        }
       } finally {
         loading.value = false;
       }
@@ -156,7 +178,7 @@ export default {
       a.click();
     };
 
-    onMounted(() => fetchFiles());
+    onMounted(() => checkStorageModeAndFetch());
 
     const StatCard = ({ label, count, icon, color, filterKey }) => (
       <div
@@ -236,6 +258,30 @@ export default {
           Showing <strong>{filteredFiles.value.length}</strong> files
           {filterType.value !== 'all' && <span style={{ marginLeft: '4px' }}>— filtered: <strong>{filterType.value}</strong></span>}
         </div>
+
+        {/* S3 Only Mode Notice */}
+        {isS3OnlyMode.value && (
+          <div style={{ textAlign: 'center', padding: '60px 20px', background: '#f9fafb', borderRadius: '12px', border: '1px dashed #e5e7eb' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>☁️</div>
+            <h3 style={{ margin: '0 0 8px', color: '#374151', fontWeight: 700 }}>R2 Browser Unavailable</h3>
+            <p style={{ margin: '0 0 20px', color: '#6b7280', fontSize: '14px', maxWidth: '400px', marginLeft: 'auto', marginRight: 'auto' }}>
+              Current storage mode is <strong>S3 Only</strong>. R2 Browser only works when storage mode is set to <strong>R2 Only</strong> or <strong>Both</strong>.
+            </p>
+            <a
+              href="/client/settings"
+              style={{ display: 'inline-block', padding: '10px 24px', background: '#6366f1', color: '#fff', borderRadius: '8px', fontWeight: 700, fontSize: '14px', textDecoration: 'none' }}
+            >
+              Go to Storage Settings
+            </a>
+          </div>
+        )}
+
+        {/* Error Banner */}
+        {r2Error.value && !loading.value && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '16px 20px', marginBottom: '16px', color: '#991b1b', fontSize: '14px' }}>
+            <strong>R2 Error:</strong> {r2Error.value}
+          </div>
+        )}
 
         {/* Loading */}
         {loading.value && (

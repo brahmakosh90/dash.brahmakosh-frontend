@@ -495,7 +495,7 @@ export default {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={labelStyle}>
                   First Message
-                  <span style={{ color: '#9ca3af', fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: '0.35rem' }}>(optional)</span>
+                  <span style={{ color: '#9ca3af', fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: '0.35rem' }}>(not used in voice calls — a short personalised greeting is played automatically)</span>
                 </label>
                 {form.value.firstMessage.trim() && form.value.voiceName && (
                   <button

@@ -259,6 +259,12 @@ class ApiService {
         }
       }
   
+      // Endpoints where 4xx errors are expected/handled by UI — suppress console noise
+      const silentEndpoints = [
+        '/client/settings/r2-browser'
+      ];
+      const isSilent = silentEndpoints.some(s => endpoint.includes(s));
+
       if (!response.ok) {
         if (response.status === 403 && data.error === 'INVALID_ROLE') {
           console.error('[API Error - Role Mismatch]', {
@@ -280,14 +286,16 @@ class ApiService {
             ? `${data.message} (${data.error})` 
             : data.error || data.message || 'Request failed';
           
-          console.error('[API Error]', {
-            endpoint,
-            status: response.status,
-            statusText: response.statusText,
-            error: errorMessage,
-            hasToken: !!token,
-            responseData: data
-          });
+          if (!isSilent) {
+            console.error('[API Error]', {
+              endpoint,
+              status: response.status,
+              statusText: response.statusText,
+              error: errorMessage,
+              hasToken: !!token,
+              responseData: data
+            });
+          }
           
           const error = new Error(errorMessage);
           error.status = response.status;
@@ -299,11 +307,13 @@ class ApiService {
   
       return data;
     } catch (error) {
-      console.error('[API Exception]', {
-        endpoint,
-        error: error.message,
-        hasToken: !!token
-      });
+      if (!endpoint.includes('/client/settings/r2-browser')) {
+        console.error('[API Exception]', {
+          endpoint,
+          error: error.message,
+          hasToken: !!token
+        });
+      }
       throw error;
     }
   }
