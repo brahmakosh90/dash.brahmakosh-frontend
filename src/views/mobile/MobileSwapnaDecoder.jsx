@@ -1,6 +1,6 @@
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
-import { MoonIcon, MagnifyingGlassIcon, InboxIcon, ClipboardDocumentListIcon } from '@heroicons/vue/24/outline';
+import { MoonIcon, MagnifyingGlassIcon, InboxIcon, ClipboardDocumentListIcon, SparklesIcon, MicrophoneIcon } from '@heroicons/vue/24/outline';
 import swapnaDecoderService from '../../services/swapnaDecoderService';
 import dreamRequestService from '../../services/dreamRequestService';
 import { useToast } from 'vue-toastification';
@@ -18,8 +18,136 @@ export default {
     const selectedDream = ref(null);
     const showDetailModal = ref(false);
     const showRequestModal = ref(false);
-    const activeTab = ref('dreams');
+    const activeTab = ref('ask');
     const myRequests = ref([]);
+
+    // ── Ask Your Dream (AI) ─────────────────────────────────────────────────────
+    const MAX_DREAM_LENGTH = 1500;      // keep in sync with backend swapnaInterpretService
+    const MAX_QUESTION_LENGTH = 300;
+    const MAX_FOLLOWUP_TURNS = 6;
+    const dreamText = ref('');
+    const interpretLanguage = ref('hi');
+    const decoding = ref(false);
+    const askingFollowUp = ref(false);
+    const interpretError = ref('');
+    const interpretation = ref(null);   // first interpretation result
+    const suggestedFollowUps = ref([]); // chips for the next question
+    const followUps = ref([]);          // answered [{ question, answer }]
+    const followUpInput = ref('');
+    const listeningTarget = ref(null);  // 'dream' | 'followup' | null
+
+    const SpeechRecognitionApi = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+    const speechSupported = !!SpeechRecognitionApi;
+    let recognition = null;
+
+    const stopVoice = () => {
+      if (recognition) {
+        try { recognition.stop(); } catch (_) {}
+        recognition = null;
+      }
+      listeningTarget.value = null;
+    };
+
+    const toggleVoice = (target) => {
+      if (listeningTarget.value === target) {
+        stopVoice();
+        return;
+      }
+      stopVoice();
+      recognition = new SpeechRecognitionApi();
+      recognition.lang = interpretLanguage.value === 'hi' ? 'hi-IN' : 'en-IN';
+      recognition.interimResults = false;
+      recognition.continuous = target === 'dream';
+      const base = target === 'dream' ? dreamText.value : followUpInput.value;
+      recognition.onresult = (event) => {
+        const spoken = Array.from(event.results).map(r => r[0].transcript).join(' ').trim();
+        const joined = [base.trim(), spoken].filter(Boolean).join(' ');
+        if (target === 'dream') dreamText.value = joined.slice(0, MAX_DREAM_LENGTH);
+        else followUpInput.value = joined.slice(0, MAX_QUESTION_LENGTH);
+      };
+      recognition.onerror = (event) => {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          toast.error('Microphone permission is needed for voice input.');
+        }
+        listeningTarget.value = null;
+      };
+      recognition.onend = () => { listeningTarget.value = null; };
+      try {
+        recognition.start();
+        listeningTarget.value = target;
+      } catch (_) {
+        recognition = null;
+      }
+    };
+
+    const requestInterpretation = async (payload) => {
+      const token = localStorage.getItem('token_user');
+      if (!token) throw new Error('Please login again to decode your dream.');
+      const res = await swapnaDecoderService.interpret(payload, token);
+      return res.data;
+    };
+
+    const decodeDream = async () => {
+      if (decoding.value) return;
+      stopVoice();
+      const dream = dreamText.value.trim();
+      if (dream.length < 10) {
+        interpretError.value = 'Please describe your dream in a little more detail.';
+        return;
+      }
+      interpretError.value = '';
+      decoding.value = true;
+      askingFollowUp.value = false;
+      try {
+        const data = await requestInterpretation({ dream, language: interpretLanguage.value });
+        interpretation.value = data;
+        suggestedFollowUps.value = data.followUps || [];
+        followUps.value = [];
+        followUpInput.value = '';
+      } catch (error) {
+        interpretError.value = error.message || 'Could not decode your dream right now. Please try again.';
+      } finally {
+        decoding.value = false;
+      }
+    };
+
+    const askFollowUp = async (presetQuestion) => {
+      if (decoding.value || !interpretation.value) return;
+      stopVoice();
+      const question = String(presetQuestion ?? followUpInput.value).trim();
+      if (!question) return;
+      interpretError.value = '';
+      decoding.value = true;
+      askingFollowUp.value = true;
+      try {
+        const data = await requestInterpretation({
+          dream: dreamText.value.trim(),
+          language: interpretLanguage.value,
+          question,
+          history: followUps.value
+        });
+        followUps.value = [...followUps.value, { question, answer: data.answer || data.summary }];
+        suggestedFollowUps.value = data.followUps || [];
+        followUpInput.value = '';
+      } catch (error) {
+        interpretError.value = error.message || 'Could not answer right now. Please try again.';
+      } finally {
+        decoding.value = false;
+        askingFollowUp.value = false;
+      }
+    };
+
+    const openMatchedSymbol = async (id) => {
+      const known = dreamList.value.find(d => d._id === id);
+      if (known) { viewDream(known); return; }
+      try {
+        viewDream(await swapnaDecoderService.getById(id));
+      } catch (_) {
+        toast.error('Could not open this dream.');
+      }
+    };
+
+    onBeforeUnmount(stopVoice);
     const requestForm = ref({
       dreamSymbol: '',
       additionalDetails: ''
@@ -185,6 +313,29 @@ export default {
             border-color: #6366f1;
             box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
           }
+          .ask-textarea {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 1rem;
+            resize: vertical;
+            box-sizing: border-box;
+          }
+          .ask-textarea:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+          }
+          .badge-tradition, .badge-reflection {
+            display: inline-block;
+            padding: 0.25rem 0.65rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+          }
+          .badge-tradition { background: #fef3c7; color: #92400e; }
+          .badge-reflection { background: #ede9fe; color: #5b21b6; }
           .category-chip {
             padding: 0.5rem 1rem;
             border-radius: 20px;
@@ -246,66 +397,196 @@ export default {
         </div>
 
         {/* Tabs */}
-        <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; background: white; border-radius: 16px; padding: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-          <button
-            onClick={() => activeTab.value = 'dreams'}
-            style={{
-              flex: 1,
-              padding: '0.875rem',
-              background: activeTab.value === 'dreams' ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' : 'transparent',
-              border: 'none',
-              borderRadius: '12px',
-              color: activeTab.value === 'dreams' ? 'white' : '#6b7280',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '0.95rem',
-              transition: 'all 0.3s ease',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem',
-              boxShadow: activeTab.value === 'dreams' ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none'
-            }}
-          >
-            <MoonIcon style={{ width: '1.25rem', height: '1.25rem' }} />
-            Dreams
-          </button>
-          <button
-            onClick={() => { 
-              activeTab.value = 'requests'; 
-              // Only fetch if not already fetched
-              if (myRequests.value.length === 0) {
-                fetchMyRequests();
-              }
-            }}
-            style={{
-              flex: 1,
-              padding: '0.875rem',
-              background: activeTab.value === 'requests' ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' : 'transparent',
-              border: 'none',
-              borderRadius: '12px',
-              color: activeTab.value === 'requests' ? 'white' : '#6b7280',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '0.95rem',
-              transition: 'all 0.3s ease',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem',
-              position: 'relative',
-              boxShadow: activeTab.value === 'requests' ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none'
-            }}
-          >
-            <ClipboardDocumentListIcon style={{ width: '1.25rem', height: '1.25rem' }} />
-            My Requests
-            {myRequests.value.filter(r => r.status === 'Completed').length > 0 && (
-              <span style="position: absolute; top: 0.25rem; right: 0.25rem; background: #10b981; color: white; border-radius: 10px; padding: 0.125rem 0.5rem; font-size: 0.7rem; font-weight: 700; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.4);">
-                {myRequests.value.filter(r => r.status === 'Completed').length}
-              </span>
-            )}
-          </button>
+        <div style="display: flex; gap: 0.35rem; margin-bottom: 1.5rem; background: white; border-radius: 16px; padding: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+          {[
+            { key: 'ask', label: 'Ask Your Dream', icon: SparklesIcon },
+            { key: 'dreams', label: 'Popular Dreams', icon: MoonIcon },
+            { key: 'requests', label: 'My Requests', icon: ClipboardDocumentListIcon }
+          ].map(tab => {
+            const active = activeTab.value === tab.key;
+            const completedCount = tab.key === 'requests' ? myRequests.value.filter(r => r.status === 'Completed').length : 0;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  activeTab.value = tab.key;
+                  if (tab.key === 'requests' && myRequests.value.length === 0) fetchMyRequests();
+                }}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem 0.25rem',
+                  background: active ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '12px',
+                  color: active ? 'white' : '#6b7280',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.25rem',
+                  position: 'relative',
+                  boxShadow: active ? '0 4px 12px rgba(99, 102, 241, 0.3)' : 'none'
+                }}
+              >
+                <tab.icon style={{ width: '1.25rem', height: '1.25rem' }} />
+                {tab.label}
+                {completedCount > 0 && (
+                  <span style="position: absolute; top: 0.25rem; right: 0.25rem; background: #10b981; color: white; border-radius: 10px; padding: 0.125rem 0.5rem; font-size: 0.7rem; font-weight: 700;">
+                    {completedCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
+
+        {/* Ask Your Dream */}
+        {activeTab.value === 'ask' && (
+          <div style="display: grid; gap: 1rem; margin-bottom: 1.5rem;">
+            <div style="background: white; border-radius: 16px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <label style="font-weight: 700; color: #374151;">Describe your dream</label>
+                <div style="display: flex; gap: 0.25rem;">
+                  {[['hi', 'हिं'], ['en', 'EN']].map(([code, label]) => (
+                    <button
+                      key={code}
+                      onClick={() => { interpretLanguage.value = code; }}
+                      style={`padding: 0.2rem 0.6rem; border-radius: 8px; border: 1px solid ${interpretLanguage.value === code ? '#6366f1' : '#e5e7eb'}; background: ${interpretLanguage.value === code ? '#e0e7ff' : 'white'}; color: #4338ca; font-size: 0.75rem; font-weight: 600; cursor: pointer;`}
+                    >{label}</button>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                class="ask-textarea"
+                rows="5"
+                maxlength={MAX_DREAM_LENGTH}
+                value={dreamText.value}
+                onInput={(e) => { dreamText.value = e.target.value; }}
+                placeholder="e.g. I saw a white elephant walking near a temple at dawn..."
+              ></textarea>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                <span style="font-size: 0.75rem; color: #9ca3af;">{dreamText.value.length}/{MAX_DREAM_LENGTH}</span>
+                <div style="display: flex; gap: 0.5rem;">
+                  {speechSupported && (
+                    <button
+                      onClick={() => toggleVoice('dream')}
+                      aria-label={listeningTarget.value === 'dream' ? 'Stop voice input' : 'Speak your dream'}
+                      style={`display: flex; align-items: center; gap: 0.35rem; padding: 0.6rem 0.9rem; border-radius: 12px; border: 2px solid ${listeningTarget.value === 'dream' ? '#ef4444' : '#e5e7eb'}; background: ${listeningTarget.value === 'dream' ? '#fee2e2' : 'white'}; color: ${listeningTarget.value === 'dream' ? '#b91c1c' : '#374151'}; font-weight: 600; cursor: pointer;`}
+                    >
+                      <MicrophoneIcon style="width: 1.1rem; height: 1.1rem;" />
+                      {listeningTarget.value === 'dream' ? 'Listening…' : 'Speak'}
+                    </button>
+                  )}
+                  <button
+                    onClick={decodeDream}
+                    disabled={decoding.value}
+                    style={`padding: 0.6rem 1.4rem; border-radius: 12px; border: none; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; font-weight: 700; cursor: ${decoding.value ? 'wait' : 'pointer'}; opacity: ${decoding.value ? 0.7 : 1};`}
+                  >
+                    {decoding.value && !askingFollowUp.value ? 'Decoding…' : '✨ Decode'}
+                  </button>
+                </div>
+              </div>
+              {interpretError.value && (
+                <p style="margin: 0.75rem 0 0 0; color: #b91c1c; font-size: 0.875rem;">{interpretError.value}</p>
+              )}
+            </div>
+
+            {interpretation.value && (
+              <div style="background: white; border-radius: 16px; padding: 1.25rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+                {interpretation.value.notADream ? (
+                  <p style="margin: 0; color: #374151; line-height: 1.6;">{interpretation.value.summary || 'Please describe a dream you saw, and I will decode it.'}</p>
+                ) : (
+                  <>
+                    <h3 style="margin: 0 0 0.5rem 0; font-size: 1.2rem; font-weight: 800; color: #1f2937;">{interpretation.value.title}</h3>
+                    <p style="margin: 0 0 1rem 0; color: #374151; line-height: 1.6;">{interpretation.value.summary}</p>
+
+                    {interpretation.value.tradition.length > 0 && (
+                      <div style="margin-bottom: 1rem;">
+                        <span class="badge-tradition">📜 From Tradition</span>
+                        {interpretation.value.tradition.map((t, idx) => (
+                          <div key={idx} style="background: #fffbeb; border-left: 3px solid #f59e0b; padding: 0.75rem; border-radius: 8px; margin-top: 0.5rem;">
+                            <p style="margin: 0 0 0.25rem 0; font-weight: 700; color: #92400e;">{t.symbol}</p>
+                            <p style="margin: 0; color: #78350f; font-size: 0.9rem; line-height: 1.5;">{t.meaning}</p>
+                            {t.source && <p style="margin: 0.35rem 0 0 0; color: #a16207; font-size: 0.75rem;">Source: {t.source}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {interpretation.value.matchedSymbols.length > 0 && (
+                      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+                        {interpretation.value.matchedSymbols.map(sym => (
+                          <button key={sym._id} onClick={() => openMatchedSymbol(sym._id)} style="padding: 0.3rem 0.7rem; border-radius: 999px; border: 1px solid #c7d2fe; background: #eef2ff; color: #4338ca; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+                            Read full meaning: {sym.symbolName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {interpretation.value.reflection.length > 0 && (
+                      <div style="margin-bottom: 1rem;">
+                        <span class="badge-reflection">💭 Personal Reflection (speculative)</span>
+                        <ul style="margin: 0.5rem 0 0 0; padding-left: 1.25rem; color: #4b5563; line-height: 1.6;">
+                          {interpretation.value.reflection.map((r, idx) => <li key={idx}>{r}</li>)}
+                        </ul>
+                      </div>
+                    )}
+
+                    {followUps.value.length > 0 && (
+                      <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
+                        {followUps.value.map((f, idx) => (
+                          <div key={idx} style="margin-bottom: 0.75rem;">
+                            <p style="margin: 0 0 0.25rem 0; font-weight: 700; color: #4338ca; font-size: 0.9rem;">Q: {f.question}</p>
+                            <p style="margin: 0; color: #374151; line-height: 1.6;">{f.answer}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {suggestedFollowUps.value.length > 0 && followUps.value.length < MAX_FOLLOWUP_TURNS && (
+                      <div style="margin-top: 1rem;">
+                        <p style="margin: 0 0 0.5rem 0; font-size: 0.8rem; font-weight: 700; color: #6b7280; text-transform: uppercase;">Ask a follow-up</p>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+                          {suggestedFollowUps.value.map((q, idx) => (
+                            <button key={idx} disabled={decoding.value} onClick={() => askFollowUp(q)} style="padding: 0.4rem 0.8rem; border-radius: 999px; border: 1px solid #e5e7eb; background: #f9fafb; color: #374151; font-size: 0.8rem; cursor: pointer; text-align: left;">
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                          <input
+                            type="text"
+                            class="search-input"
+                            style="padding-left: 1rem;"
+                            maxlength={MAX_QUESTION_LENGTH}
+                            placeholder="Type your own question..."
+                            value={followUpInput.value}
+                            onInput={(e) => { followUpInput.value = e.target.value; }}
+                            onKeydown={(e) => { if (e.key === 'Enter') askFollowUp(); }}
+                          />
+                          {speechSupported && (
+                            <button onClick={() => toggleVoice('followup')} aria-label="Speak your question" style={`padding: 0 0.8rem; border-radius: 12px; border: 2px solid ${listeningTarget.value === 'followup' ? '#ef4444' : '#e5e7eb'}; background: ${listeningTarget.value === 'followup' ? '#fee2e2' : 'white'}; cursor: pointer;`}>
+                              <MicrophoneIcon style="width: 1.1rem; height: 1.1rem; color: #374151;" />
+                            </button>
+                          )}
+                          <button onClick={() => askFollowUp()} disabled={decoding.value} style="padding: 0 1rem; border-radius: 12px; border: none; background: #6366f1; color: white; font-weight: 700; cursor: pointer;">Ask</button>
+                        </div>
+                        {decoding.value && askingFollowUp.value && <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: #9ca3af;">Thinking…</p>}
+                      </div>
+                    )}
+                  </>
+                )}
+                <p style="margin: 1rem 0 0 0; font-size: 0.75rem; color: #9ca3af; line-height: 1.5;">
+                  AI-generated for reflection and guidance only. It is not a prediction, and not medical, legal or financial advice.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Search */}
         {activeTab.value === 'dreams' && (

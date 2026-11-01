@@ -47,6 +47,12 @@ const swapnaDecoderService = {
     });
   },
 
+  // AI interpretation of a typed dream; pass question + history for a follow-up
+  interpret: async ({ dream, language, question, history }, token) => {
+    const response = await api.post('/swapna-decoder/interpret', { dream, language, question, history }, { token });
+    return response.data;
+  },
+
   // Create new dream symbol
   create: async (data) => {
     const response = await api.post('/swapna-decoder', data);

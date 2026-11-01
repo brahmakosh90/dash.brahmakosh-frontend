@@ -257,7 +257,7 @@ export default {
     };
     
     const goBack = () => {
-      router.push('/mobile/user/activities');
+      router.push('/mobile/user/spiritual-checkin');
     };
 
     const fetchChantingConfigurations = async () => {
