@@ -4,6 +4,7 @@ import { useToast } from 'vue-toastification';
 import { PlusIcon, PencilIcon, TrashIcon, CheckCircleIcon, XCircleIcon, ArrowLeftIcon, MoonIcon, EyeIcon, EllipsisVerticalIcon, InboxIcon } from '@heroicons/vue/24/outline';
 import swapnaDecoderService from '../../services/swapnaDecoderService';
 import dreamRequestService from '../../services/dreamRequestService';
+import api from '../../services/api';
 
 export default {
   name: 'SwapnaDecoder',
@@ -83,6 +84,20 @@ export default {
       'Events': ['Marriage', 'Death', 'Birth', 'Festival', 'Accident', 'Other']
     });
 
+    // The logged-in client's own CLI-XXXXXX code. Client login never stores it in localStorage (that key is
+    // only written for end-user logins, and may belong to another client), so ask the server who we are.
+    let cachedClientCode = null;
+    const resolveClientCode = async () => {
+      if (cachedClientCode) return cachedClientCode;
+      try {
+        const response = await api.getCurrentClient(localStorage.getItem('token_client'));
+        cachedClientCode = response?.data?.user?.clientId || null;
+      } catch (error) {
+        console.error('Could not resolve client id:', error);
+      }
+      return cachedClientCode;
+    };
+
     const goBack = () => {
       router.push('/client/tools');
     };
@@ -90,7 +105,7 @@ export default {
     const fetchDreams = async () => {
       loading.value = true;
       try {
-        const clientId = localStorage.getItem('user_client_id');
+        const clientId = await resolveClientCode();
         const data = await swapnaDecoderService.getAll({ clientId });
         dreamList.value = data.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
       } catch (error) {
@@ -332,7 +347,7 @@ export default {
         return;
       }
       
-      const clientId = localStorage.getItem('user_client_id');
+      const clientId = await resolveClientCode();
       if (!clientId) {
         toast.error('Client ID not found. Please login again.');
         return;
@@ -519,7 +534,7 @@ export default {
     const fetchRequests = async () => {
       loading.value = true;
       try {
-        const clientId = localStorage.getItem('user_client_id');
+        const clientId = await resolveClientCode();
         const data = await dreamRequestService.getAll({ clientId });
         requestList.value = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         const stats = await dreamRequestService.getStats({ clientId });
