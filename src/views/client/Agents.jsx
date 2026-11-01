@@ -56,6 +56,9 @@ export default {
       }
     };
 
+    // Preview speaks a sample name instead of the literal {name} placeholder
+    const previewGreeting = (text) => String(text || '').replace(/\{\{?\s*name\s*\}\}?/gi, 'Anil');
+
     const playTTS = async (text, voiceName, agentId = null, isFormPreview = false, logKey = null) => {
       if (!text?.trim()) return;
 
@@ -495,13 +498,13 @@ export default {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label style={labelStyle}>
                   First Message
-                  <span style={{ color: '#9ca3af', fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: '0.35rem' }}>(not used in voice calls — a short personalised greeting is played automatically)</span>
+                  <span style={{ color: '#9ca3af', fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: '0.35rem' }}>{"(spoken once when the call starts · use {name} for the user's first name · empty = default short greeting)"}</span>
                 </label>
                 {form.value.firstMessage.trim() && form.value.voiceName && (
                   <button
                     onClick={() => playingForm.value
                       ? stopAudio()
-                      : playTTS(form.value.firstMessage, form.value.voiceName, null, true)
+                      : playTTS(previewGreeting(form.value.firstMessage), form.value.voiceName, null, true)
                     }
                     title={playingForm.value ? 'Stop preview' : 'Preview first message'}
                     style={{
@@ -539,7 +542,8 @@ export default {
                   value={form.value.firstMessage}
                   onInput={(e) => (form.value.firstMessage = e.target.value)}
                   rows={3}
-                  placeholder="The first thing the agent says when a session starts, e.g. 'Hare Krishna! How can I guide you today?'"
+                  placeholder="e.g. Hello, {name}. I am Rashmi. How can I help you?"
+                  maxLength={160}
                   style={{
                     ...inputStyle,
                     resize: 'vertical',
@@ -957,7 +961,7 @@ export default {
                           <button
                             onClick={() => playingAgentId.value === a._id
                               ? stopAudio()
-                              : playTTS(a.firstMessage, a.voiceName, a._id)
+                              : playTTS(previewGreeting(a.firstMessage), a.voiceName, a._id)
                             }
                             title={playingAgentId.value === a._id ? 'Stop' : 'Play first message'}
                             style={{
