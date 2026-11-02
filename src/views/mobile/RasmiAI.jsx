@@ -12,17 +12,42 @@ import { useAuth } from '../../store/auth.js';
 import { getSocketServerUrl } from '../../utils/socketUrl.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const TARGET_SAMPLE_RATE = 16000;     // Deepgram on the backend expects linear16 @ 16kHz mono
-const SEND_INTERVAL_SEC = 0.1;        // ship mic audio in ~100ms frames
-const START_TIMEOUT_MS = 15000;       // give up if the server never confirms "started"
-const MIC_RESUME_TAIL_MS = 350;       // keep mic closed briefly after playback to avoid echo
+const REALTIME_SAMPLE_RATE = 24000;   // OpenAI Realtime expects PCM16 @ 24kHz mono
+const START_TIMEOUT_MS = 15000;
+const MIC_RESUME_TAIL_MS = 350;
 const VOICE_CHAT_TITLE = 'Voice Agent Chat';
 
+// Downsample mic to 24kHz and emit ~100ms PCM16 chunks
 const WORKLET_SOURCE = `
 class RasmiCapture extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.ratio = sampleRate / ${REALTIME_SAMPLE_RATE};
+    this.pos = 0;
+    this.prev = 0;
+    this.out = new Int16Array(2400);
+    this.n = 0;
+  }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
-    if (ch) this.port.postMessage(ch.slice(0));
+    if (!ch || ch.length === 0) return true;
+    while (this.pos < ch.length - 1) {
+      const i0 = Math.floor(this.pos);
+      const frac = this.pos - i0;
+      const s0 = i0 < 0 ? this.prev : ch[i0];
+      const s1 = ch[i0 + 1];
+      const s = Math.max(-1, Math.min(1, s0 + (s1 - s0) * frac));
+      this.out[this.n++] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      this.pos += this.ratio;
+      if (this.n === this.out.length) {
+        const chunk = this.out;
+        this.port.postMessage(chunk.buffer, [chunk.buffer]);
+        this.out = new Int16Array(2400);
+        this.n = 0;
+      }
+    }
+    this.prev = ch[ch.length - 1];
+    this.pos -= ch.length;
     return true;
   }
 }
@@ -35,7 +60,6 @@ const ERROR_MESSAGES = {
   INVALID_ROLE: 'Ye feature sirf user account ke liye hai.',
   INSUFFICIENT_CREDITS: 'Aapke credits khatam ho gaye hain. Call band kar di gayi hai.',
   MISSING_API_KEYS: 'Voice service abhi available nahi hai. Thodi der baad try karein.',
-  DEEPGRAM_RECONNECT_FAILED: 'Awaaz pehchanne wali service disconnect ho gayi. Dobara call shuru karein.'
 };
 
 const STATUS_LABEL = {
@@ -47,26 +71,11 @@ const STATUS_LABEL = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-const toWsUrl = () => {
+const toWsUrl = (token, agentId) => {
   const base = getSocketServerUrl().replace(/\/+$/, '');
   const wsBase = base.replace(/^http/i, 'ws');
-  return `${wsBase}/api/voice/agent`;
-};
-
-const downsampleToPcm16 = (input, inRate) => {
-  const ratio = inRate / TARGET_SAMPLE_RATE;
-  const outLen = Math.floor(input.length / ratio);
-  const out = new Int16Array(outLen);
-  for (let i = 0; i < outLen; i++) {
-    const start = Math.floor(i * ratio);
-    const end = Math.min(Math.floor((i + 1) * ratio), input.length);
-    let sum = 0;
-    for (let j = start; j < end; j++) sum += input[j];
-    const avg = end > start ? sum / (end - start) : 0;
-    const s = Math.max(-1, Math.min(1, avg));
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return out;
+  const agentParam = agentId ? `&agentId=${encodeURIComponent(agentId)}` : '';
+  return `${wsBase}/realtime?token=${encodeURIComponent(token)}${agentParam}`;
 };
 
 const bytesToBase64 = (bytes) => {
@@ -78,11 +87,11 @@ const bytesToBase64 = (bytes) => {
   return btoa(bin);
 };
 
-const base64ToBytes = (b64) => {
+const base64ToInt16 = (b64) => {
   const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
+  const bytes = new Uint8Array(bin.length - (bin.length % 2));
+  for (let i = 0; i < bytes.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Int16Array(bytes.buffer);
 };
 
 const formatDuration = (sec) => {
@@ -102,133 +111,56 @@ const formatDate = (iso) => {
   });
 };
 
-// Streams MP3 chunks for one AI turn. Uses MediaSource for low latency and
-// falls back to buffering the whole turn where MP3 MSE is unsupported (e.g. iOS Safari).
-const createTurnPlayer = ({ onStart, onEnd }) => {
-  const canStream =
-    typeof window !== 'undefined' &&
-    'MediaSource' in window &&
-    window.MediaSource.isTypeSupported('audio/mpeg');
-
-  let audio = null;
-  let mediaSource = null;
-  let sourceBuffer = null;
-  let objectUrl = null;
-  let queue = [];
-  let blobParts = [];
-  let streamDone = false;
+// PCM16 AudioContext player for OpenAI Realtime audio chunks
+const createPcmPlayer = ({ onStart, onEnd }) => {
+  let ctx = null;
+  let nextStart = 0;
+  let playing = new Set();
   let started = false;
-  let finished = false;
 
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    onEnd();
-  };
-
-  const release = () => {
-    if (audio) {
-      audio.onplaying = null;
-      audio.onended = null;
-      audio.onerror = null;
-      try { audio.pause(); } catch (_) { /* already stopped */ }
-      audio.removeAttribute('src');
-      try { audio.load(); } catch (_) { /* ignore */ }
-      audio = null;
+  const ensureCtx = () => {
+    if (!ctx || ctx.state === 'closed') {
+      ctx = new AudioContext({ sampleRate: REALTIME_SAMPLE_RATE });
+      nextStart = 0;
     }
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-      objectUrl = null;
-    }
-    mediaSource = null;
-    sourceBuffer = null;
-    queue = [];
-    blobParts = [];
-  };
-
-  const pump = () => {
-    if (!sourceBuffer || sourceBuffer.updating) return;
-    if (queue.length) {
-      try {
-        sourceBuffer.appendBuffer(queue.shift());
-      } catch (err) {
-        console.warn('[RasmiAI] appendBuffer failed:', err.message);
-      }
-      return;
-    }
-    if (streamDone && mediaSource && mediaSource.readyState === 'open') {
-      try { mediaSource.endOfStream(); } catch (_) { /* already ended */ }
-    }
-  };
-
-  const bindAudio = () => {
-    audio.onplaying = () => {
-      if (!started) {
-        started = true;
-        onStart();
-      }
-    };
-    audio.onended = finish;
-    audio.onerror = finish;
-  };
-
-  const begin = () => {
-    release();
-    finished = false;
-    started = false;
-    streamDone = false;
-    audio = new Audio();
-    audio.autoplay = false;
-    bindAudio();
-
-    if (canStream) {
-      mediaSource = new MediaSource();
-      objectUrl = URL.createObjectURL(mediaSource);
-      audio.src = objectUrl;
-      mediaSource.addEventListener('sourceopen', () => {
-        if (!mediaSource || sourceBuffer) return;
-        try {
-          sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-          sourceBuffer.addEventListener('updateend', pump);
-          pump();
-        } catch (err) {
-          console.warn('[RasmiAI] addSourceBuffer failed:', err.message);
-        }
-      });
-      audio.play().catch(finish);
-    }
+    return ctx;
   };
 
   return {
-    begin,
-    push(bytes) {
-      if (!audio) return;
-      if (canStream) {
-        queue.push(bytes);
-        pump();
-      } else {
-        blobParts.push(bytes);
-      }
-    },
-    complete() {
-      if (!audio) return;
-      streamDone = true;
-      if (canStream) {
-        pump();
-        return;
-      }
-      if (!blobParts.length) {
-        finish();
-        return;
-      }
-      objectUrl = URL.createObjectURL(new Blob(blobParts, { type: 'audio/mpeg' }));
-      audio.src = objectUrl;
-      audio.play().catch(finish);
+    push(b64) {
+      const pcm = base64ToInt16(b64);
+      if (!pcm.length) return;
+      const c = ensureCtx();
+      const buf = c.createBuffer(1, pcm.length, REALTIME_SAMPLE_RATE);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 0x8000;
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(c.destination);
+      const startAt = Math.max(c.currentTime + 0.02, nextStart);
+      src.start(startAt);
+      nextStart = startAt + buf.duration;
+      playing.add(src);
+      if (!started) { started = true; onStart(); }
+      src.onended = () => {
+        playing.delete(src);
+        try { src.disconnect(); } catch (_) {}
+        if (playing.size === 0) { started = false; onEnd(); }
+      };
     },
     stop() {
-      const wasActive = !!audio && !finished;
-      release();
-      if (wasActive) finish();
+      for (const s of playing) {
+        s.onended = null;
+        try { s.stop(); s.disconnect(); } catch (_) {}
+      }
+      playing.clear();
+      nextStart = 0;
+      if (started) { started = false; onEnd(); }
+    },
+    close() {
+      this.stop();
+      if (ctx && ctx.state !== 'closed') ctx.close().catch(() => {});
+      ctx = null;
     }
   };
 };
@@ -276,11 +208,12 @@ export default {
     let timerId = null;
     let startTimeoutId = null;
     let player = null;
-    let expectedTurnId = null;
+    let currentItemId = null;
+    let currentResponseId = null;
+    let cancelledResponses = new Set();
+    let aiTranscript = '';
     let micResumeAt = 0;
     let msgId = 0;
-    let frameBuf = [];
-    let frameBufLen = 0;
     let closing = false;
 
     const getToken = () => getTokenForRole('user') || localStorage.getItem('token_user');
@@ -365,10 +298,11 @@ export default {
     // ── Playback ─────────────────────────────────────────────────────────────
     const ensurePlayer = () => {
       if (player) return player;
-      player = createTurnPlayer({
-        onStart: () => { isPlaying.value = true; },
+      player = createPcmPlayer({
+        onStart: () => { isPlaying.value = true; agentState.value = 'speaking'; },
         onEnd: () => {
           isPlaying.value = false;
+          agentState.value = 'listening';
           micResumeAt = Date.now() + MIC_RESUME_TAIL_MS;
         }
       });
@@ -376,7 +310,7 @@ export default {
     };
 
     const stopPlayback = () => {
-      expectedTurnId = null;
+      currentItemId = null;
       if (player) player.stop();
       isPlaying.value = false;
     };
@@ -391,67 +325,29 @@ export default {
       agentState.value !== 'speaking' &&
       Date.now() >= micResumeAt;
 
-    const flushFrames = () => {
-      const merged = new Float32Array(frameBufLen);
-      let offset = 0;
-      for (const f of frameBuf) {
-        merged.set(f, offset);
-        offset += f.length;
-      }
-      frameBuf = [];
-      frameBufLen = 0;
+    const onFrame = (pcmBuffer) => {
       if (!canSendAudio()) return;
-      const pcm = downsampleToPcm16(merged, audioCtx.sampleRate);
-      if (!pcm.length) return;
-      ws.send(
-        JSON.stringify({
-          type: 'audio',
-          audio: bytesToBase64(new Uint8Array(pcm.buffer))
-        })
-      );
-    };
-
-    const onFrame = (frame) => {
-      frameBuf.push(frame);
-      frameBufLen += frame.length;
-      if (frameBufLen >= audioCtx.sampleRate * SEND_INTERVAL_SEC) flushFrames();
+      ws.send(JSON.stringify({
+        type: 'input_audio_buffer.append',
+        audio: bytesToBase64(new Uint8Array(pcmBuffer)),
+      }));
     };
 
     const startMic = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('MIC_UNSUPPORTED');
-      }
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('MIC_UNSUPPORTED');
       mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       });
-
       const Ctx = window.AudioContext || window.webkitAudioContext;
       audioCtx = new Ctx();
       if (audioCtx.state === 'suspended') await audioCtx.resume();
-
       sourceNode = audioCtx.createMediaStreamSource(mediaStream);
       silentGain = audioCtx.createGain();
       silentGain.gain.value = 0;
-
-      if (audioCtx.audioWorklet) {
-        const blobUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
-        try {
-          await audioCtx.audioWorklet.addModule(blobUrl);
-        } finally {
-          URL.revokeObjectURL(blobUrl);
-        }
-        captureNode = new AudioWorkletNode(audioCtx, 'rasmi-capture');
-        captureNode.port.onmessage = (e) => onFrame(e.data);
-      } else {
-        captureNode = audioCtx.createScriptProcessor(4096, 1, 1);
-        captureNode.onaudioprocess = (e) => onFrame(new Float32Array(e.inputBuffer.getChannelData(0)));
-      }
-
+      const blobUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
+      try { await audioCtx.audioWorklet.addModule(blobUrl); } finally { URL.revokeObjectURL(blobUrl); }
+      captureNode = new AudioWorkletNode(audioCtx, 'rasmi-capture', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+      captureNode.port.onmessage = (e) => onFrame(e.data);
       sourceNode.connect(captureNode);
       captureNode.connect(silentGain);
       silentGain.connect(audioCtx.destination);
@@ -474,8 +370,6 @@ export default {
         audioCtx.close().catch(() => {});
         audioCtx = null;
       }
-      frameBuf = [];
-      frameBufLen = 0;
     };
 
     // ── Session lifecycle ────────────────────────────────────────────────────
@@ -495,9 +389,6 @@ export default {
         ws = null;
         socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
         try {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'stop' }));
-          }
           socket.close();
         } catch (_) { /* socket already closed */ }
       }
@@ -513,59 +404,77 @@ export default {
 
     const handleServerMessage = (data) => {
       switch (data.type) {
-        case 'started':
+        case 'session.created':
           if (startTimeoutId) { clearTimeout(startTimeoutId); startTimeoutId = null; }
+          if (callState.value !== 'connecting') break;
           callState.value = 'live';
           agentState.value = 'listening';
           seconds.value = 0;
           timerId = setInterval(() => { seconds.value += 1; }, 1000);
           break;
 
-        case 'transcript':
-          liveCaption.value = data.text;
-          break;
-
-        case 'user_message':
-          liveCaption.value = '';
-          addMessage('user', data.text);
-          break;
-
-        case 'agent_state':
-          agentState.value = data.state;
-          break;
-
-        case 'ai_response':
-          expectedTurnId = data.turnId;
-          addMessage('ai', data.text);
-          ensurePlayer().begin();
-          break;
-
-        case 'audio_chunk':
-          if (data.turnId !== expectedTurnId || !data.audio) break;
-          ensurePlayer().push(base64ToBytes(data.audio));
-          break;
-
-        case 'audio_complete':
-          if (data.turnId === expectedTurnId) ensurePlayer().complete();
-          break;
-
-        case 'interruption_acknowledged':
+        case 'input_audio_buffer.speech_started':
+          // User barge-in: drop whatever the agent is still saying
+          if (currentResponseId) cancelledResponses.add(currentResponseId);
           stopPlayback();
+          agentState.value = 'listening';
+          liveCaption.value = 'Listening…';
+          break;
+
+        case 'input_audio_buffer.speech_stopped':
+          liveCaption.value = '';
+          agentState.value = 'processing';
+          break;
+
+        case 'conversation.item.input_audio_transcription.completed':
+          addMessage('user', (data.transcript || '').trim());
+          break;
+
+        case 'response.created':
+          currentResponseId = data.response?.id || null;
+          aiTranscript = '';
+          if (!isPlaying.value) agentState.value = 'processing';
+          break;
+
+        case 'response.output_audio.delta':
+          if (!data.delta || cancelledResponses.has(data.response_id)) break;
+          currentItemId = data.item_id || currentItemId;
+          ensurePlayer().push(data.delta);
+          break;
+
+        case 'response.output_audio_transcript.delta':
+          if (!cancelledResponses.has(data.response_id)) aiTranscript += data.delta || '';
+          break;
+
+        case 'response.output_audio_transcript.done':
+          if (!cancelledResponses.has(data.response_id)) addMessage('ai', (data.transcript || aiTranscript).trim());
+          aiTranscript = '';
+          break;
+
+        case 'response.done':
+          if (!isPlaying.value) agentState.value = 'listening';
+          break;
+
+        case 'proxy.error':
+          failCall(data.message || 'Voice service abhi available nahi hai. Thodi der baad try karein.');
           break;
 
         case 'credit:update':
           balance.value = data.remainingBalance;
           break;
 
+        case 'credit:warning':
+          balance.value = data.remainingBalance ?? 0;
+          failCall(ERROR_MESSAGES.INSUFFICIENT_CREDITS);
+          break;
+
         case 'error':
-          if (data.error === 'INSUFFICIENT_CREDITS') balance.value = data.remainingBalance ?? 0;
-          if (data.error && ERROR_MESSAGES[data.error]) {
-            failCall(ERROR_MESSAGES[data.error]);
-          } else if (callState.value !== 'live') {
-            failCall(data.message || 'Call shuru nahi ho payi. Dobara try karein.');
+          // Harmless races: cancelling a reply that just finished, or a duplicate cancel
+          if (['response_cancel_not_active', 'conversation_already_has_active_response'].includes(data.error?.code)) break;
+          if (callState.value !== 'live') {
+            failCall(data.error?.message || 'Call shuru nahi ho payi. Dobara try karein.');
           } else {
-            // Recoverable turn-level error (LLM/TTS) — server already returns to listening
-            addMessage('system', data.message || 'Kuch gadbad hui, dobara bolein.');
+            addMessage('system', 'Kuch gadbad hui, dobara bolein.');
             stopPlayback();
           }
           break;
@@ -596,7 +505,10 @@ export default {
       seconds.value = 0;
       agentState.value = 'listening';
       isPlaying.value = false;
-      expectedTurnId = null;
+      currentItemId = null;
+      currentResponseId = null;
+      cancelledResponses = new Set();
+      aiTranscript = '';
       callState.value = 'connecting';
 
       try {
@@ -620,22 +532,13 @@ export default {
       }
 
       try {
-        ws = new WebSocket(toWsUrl());
+        ws = new WebSocket(toWsUrl(token, target.agentId));
       } catch (err) {
         failCall('Server se connect nahi ho paya.');
         return;
       }
 
       ws.onopen = () => {
-        ws.send(
-          JSON.stringify({
-            type: 'start',
-            token,
-            chatId: 'new',
-            ...(target.agentId ? { agentId: target.agentId } : {}),
-            voiceName: target.voiceName
-          })
-        );
         startTimeoutId = setTimeout(() => {
           if (callState.value === 'connecting') failCall('Server ne jawab nahi diya. Dobara try karein.');
         }, START_TIMEOUT_MS);
@@ -655,9 +558,14 @@ export default {
         if (callState.value === 'connecting') failCall('Server se connect nahi ho paya.');
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (callState.value === 'live' || callState.value === 'connecting') {
-          failCall(callError.value || 'Connection toot gaya. Dobara call shuru karein.');
+          const byCode = {
+            4008: 'Call ki maximum duration poori ho gayi. Dobara call shuru kar sakte hain.',
+            4009: 'Aapne dusri jagah call shuru ki hai, isliye ye call band ho gayi.',
+            4010: ERROR_MESSAGES.INSUFFICIENT_CREDITS
+          };
+          failCall(callError.value || byCode[event?.code] || 'Connection toot gaya. Dobara call shuru karein.');
         }
       };
     };
@@ -682,8 +590,9 @@ export default {
       if (callState.value !== 'live') return;
       if (agentState.value !== 'speaking' && !isPlaying.value) return;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'interrupt', turnId: expectedTurnId }));
+        ws.send(JSON.stringify({ type: 'response.cancel' }));
       }
+      if (currentResponseId) cancelledResponses.add(currentResponseId);
       stopPlayback();
       agentState.value = 'listening';
     };

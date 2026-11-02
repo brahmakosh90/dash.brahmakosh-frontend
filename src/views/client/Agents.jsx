@@ -157,6 +157,40 @@ export default {
       loadConversationLogs();
     };
 
+    const formatCallDuration = (sec) => {
+      const total = Math.max(0, Math.round(sec || 0));
+      const m = Math.floor(total / 60);
+      const r = String(total % 60).padStart(2, '0');
+      return m > 0 ? `${m}m ${r}s` : `${total}s`;
+    };
+    const formatLogDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+    const formatLogTime = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : '—');
+
+    // Plays every recorded message of a call back to back (the full call recording)
+    const playingAllId = ref(null);
+    let allAudio = null;
+    const stopAll = () => {
+      playingAllId.value = null;
+      if (allAudio) { allAudio.onended = allAudio.onerror = null; allAudio.pause(); allAudio = null; }
+    };
+    const playAll = (log) => {
+      if (playingAllId.value === log._id) { stopAll(); return; }
+      const urls = (log.messages || []).filter((m) => m.audioUrl).map((m) => m.audioUrl);
+      if (!urls.length) return;
+      stopAudio();
+      stopAll();
+      playingAllId.value = log._id;
+      let i = 0;
+      const next = () => {
+        if (playingAllId.value !== log._id || i >= urls.length) { stopAll(); return; }
+        allAudio = new Audio(urls[i++]);
+        allAudio.onended = next;
+        allAudio.onerror = next;
+        allAudio.play().catch(next);
+      };
+      next();
+    };
+
     const refresh = async () => {
       loading.value = true;
       error.value = null;
@@ -659,11 +693,11 @@ export default {
           </div>
         )}
 
-        {/* ── Conversation Logs (voice agent sessions) ── */}
+        {/* ── Call History (voice agent sessions) ── */}
         <div style={{ ...card, padding: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
             <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#111827' }}>
-              Conversation Logs
+              Call History
               {logsMeta.value.total > 0 && (
                 <span style={{ marginLeft: '0.5rem', fontSize: '0.78rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: '999px', background: '#f3f4f6', color: '#6b7280' }}>
                   {logsMeta.value.total} sessions
@@ -707,129 +741,125 @@ export default {
 
           {loadingLogs.value ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af', fontSize: '0.9rem' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style={{ animation: 'spin 1s linear infinite', marginBottom: '0.5rem' }}>
-                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-              </svg>
-              <div>Loading conversation logs...</div>
+              Loading call history...
             </div>
           ) : conversationLogs.value.length === 0 ? (
             <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#6b7280', fontSize: '0.9rem' }}>
-              No voice agent conversations yet. Mobile users will appear here after they chat with an agent.
+              No voice agent calls yet. Calls will appear here after users talk to an agent.
             </div>
           ) : (
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {conversationLogs.value.map((log) => {
-                const isExpanded = expandedLogId.value === log._id;
-                const voiceName = log.agent?.voiceName || 'krishna1';
-                return (
-                  <div
-                    key={log._id}
-                    style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      background: '#fff',
-                    }}
-                  >
-                    <button
-                      onClick={() => expandedLogId.value = isExpanded ? null : log._id}
-                      style={{
-                        width: '100%',
-                        padding: '0.9rem 1rem',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      <div>
-                        <span style={{ fontWeight: 600, color: '#111827', fontSize: '0.9rem' }}>
-                          {log.user?.name || log.user?.email || 'Unknown user'}
-                        </span>
-                        {log.user?.email && (
-                          <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#6b7280' }}>
-                            {log.user.email}
+            <div style={{ overflowX: 'auto', border: '1px solid #e5e7eb', borderRadius: '12px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '900px' }}>
+                <thead>
+                  <tr>
+                    {['#', 'Date', 'Start Time', 'User', 'Agent', 'Duration', 'Messages', 'Credits', 'Status', 'Recording', 'Transcript'].map((h) => (
+                      <th key={h} style={{ padding: '0.65rem 0.8rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.03em', borderBottom: '1px solid #e5e7eb', whiteSpace: 'nowrap', background: '#f9fafb' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {conversationLogs.value.map((log, i) => {
+                    const isExpanded = expandedLogId.value === log._id;
+                    const voiceName = log.agent?.voiceName || 'krishna1';
+                    const hasRecording = (log.messages || []).some((m) => m.audioUrl);
+                    const ongoing = log.status === 'ongoing';
+                    const rowNo = (logsMeta.value.page - 1) * logsMeta.value.limit + i + 1;
+                    return [
+                      <tr key={log._id} style={{ background: isExpanded ? '#f9fafb' : '#fff' }}>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>{rowNo}</td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>{formatLogDate(log.startTime)}</td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>{formatLogTime(log.startTime)}</td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>
+                          <div style={{ fontWeight: 600, color: '#111827' }}>{log.user?.name || 'Unknown user'}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>{log.user?.email || log.user?.mobile || ''}</div>
+                        </td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>
+                          <span style={{ fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: '999px', background: '#eef2ff', color: '#4338ca', whiteSpace: 'nowrap' }}>
+                            {log.agent?.name || 'Voice Agent'}
                           </span>
-                        )}
-                        {log.agent && (
-                          <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '999px', background: '#eef2ff', color: '#4338ca' }}>
-                            {log.agent.name}
+                        </td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>{ongoing ? '—' : formatCallDuration(log.durationSeconds)}</td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>{log.messages?.length || 0}</td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>{log.creditsUsed ?? 0}</td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.15rem 0.55rem', borderRadius: '999px', background: ongoing ? '#fef3c7' : '#dcfce7', color: ongoing ? '#92400e' : '#166534' }}>
+                            {ongoing ? 'Ongoing' : 'Completed'}
                           </span>
-                        )}
-                        <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.2rem' }}>
-                          {log.messages?.length || 0} messages · {log.updatedAt ? new Date(log.updatedAt).toLocaleString() : ''}
-                        </div>
-                      </div>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
-                        <polyline points="6 9 12 15 18 9"/>
-                      </svg>
-                    </button>
-                    {isExpanded && log.messages?.length > 0 && (
-                      <div style={{ padding: '0 1rem 1rem', borderTop: '1px solid #f3f4f6' }}>
-                        {log.messages.map((msg, idx) => (
-                          <div
-                            key={idx}
-                            style={{
-                              marginTop: '0.75rem',
-                              padding: '0.65rem 0.85rem',
-                              borderRadius: '10px',
-                              background: msg.role === 'user' ? '#f9fafb' : '#f0f9ff',
-                              border: msg.role === 'user' ? '1px solid #f3f4f6' : '1px solid #bae6fd',
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '0.5rem',
-                            }}
+                        </td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>
+                          {hasRecording ? (
+                            <button
+                              onClick={() => playAll(log)}
+                              style={{ padding: '0.3rem 0.65rem', borderRadius: '6px', border: 'none', background: playingAllId.value === log._id ? '#dc2626' : '#0284c7', color: '#fff', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              {playingAllId.value === log._id ? 'Stop' : 'Play call'}
+                            </button>
+                          ) : (
+                            <span style={{ color: '#9ca3af', fontSize: '0.8rem' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.7rem 0.8rem', fontSize: '0.85rem', color: '#374151', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }}>
+                          <button
+                            onClick={() => { expandedLogId.value = isExpanded ? null : log._id; }}
+                            style={{ padding: '0.3rem 0.65rem', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}
                           >
-                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: msg.role === 'user' ? '#6b7280' : '#0284c7', textTransform: 'uppercase', flexShrink: 0 }}>
-                              {msg.role}
-                            </span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: '0.875rem', color: '#374151', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                                {msg.content}
-                              </div>
-                              {(msg.audioUrl || (msg.role === 'assistant' && msg.content?.trim())) && (
-                                <button
-                                  onClick={() => {
-                                    const key = `${log._id}-${idx}`;
-                                    if (playingLogKey.value === key) stopAudio();
-                                    else if (msg.audioUrl) playFromUrl(msg.audioUrl, key);
-                                    else playTTS(msg.content, voiceName, null, false, key);
-                                  }}
-                                  title={playingLogKey.value === `${log._id}-${idx}` ? 'Stop' : (msg.audioUrl ? 'Play recorded audio' : 'Play (TTS)')}
+                            {isExpanded ? 'Hide' : 'View'}
+                          </button>
+                        </td>
+                      </tr>,
+                      isExpanded && (
+                        <tr key={`${log._id}-detail`}>
+                          <td colSpan={11} style={{ padding: '0 1rem 1rem', background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                            {(log.messages || []).length === 0 && (
+                              <div style={{ padding: '0.75rem 0', color: '#9ca3af', fontSize: '0.85rem' }}>No messages in this call.</div>
+                            )}
+                            {(log.messages || []).map((msg, idx) => {
+                              const key = `${log._id}-${idx}`;
+                              return (
+                                <div
+                                  key={idx}
                                   style={{
-                                    marginTop: '0.35rem',
-                                    padding: '0.25rem 0.5rem',
-                                    borderRadius: '6px',
-                                    border: 'none',
-                                    background: playingLogKey.value === `${log._id}-${idx}` ? '#0ea5e9' : (msg.role === 'user' ? '#6b7280' : '#0284c7'),
-                                    color: 'white',
-                                    fontSize: '0.72rem',
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
+                                    marginTop: '0.6rem',
+                                    padding: '0.6rem 0.85rem',
+                                    borderRadius: '10px',
+                                    background: msg.role === 'user' ? '#fff' : '#f0f9ff',
+                                    border: msg.role === 'user' ? '1px solid #e5e7eb' : '1px solid #bae6fd',
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '0.6rem',
                                   }}
                                 >
-                                  {playingLogKey.value === `${log._id}-${idx}` ? (
-                                    <><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg> Stop</>
-                                  ) : (
-                                    <><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Play</>
+                                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: msg.role === 'user' ? '#6b7280' : '#0284c7', textTransform: 'uppercase', flexShrink: 0, width: '62px' }}>
+                                    {msg.role === 'user' ? 'User' : 'Agent'}
+                                  </span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: '0.86rem', color: '#374151', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                                    <div style={{ fontSize: '0.7rem', color: '#9ca3af', marginTop: '0.15rem' }}>{formatLogTime(msg.timestamp)}</div>
+                                  </div>
+                                  {(msg.audioUrl || (msg.role === 'assistant' && msg.content?.trim())) && (
+                                    <button
+                                      onClick={() => {
+                                        stopAll();
+                                        if (playingLogKey.value === key) stopAudio();
+                                        else if (msg.audioUrl) playFromUrl(msg.audioUrl, key);
+                                        else playTTS(msg.content, voiceName, null, false, key);
+                                      }}
+                                      title={msg.audioUrl ? 'Play recorded audio' : 'Play (TTS)'}
+                                      style={{ flexShrink: 0, padding: '0.25rem 0.6rem', borderRadius: '6px', border: 'none', background: playingLogKey.value === key ? '#dc2626' : '#0284c7', color: '#fff', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}
+                                    >
+                                      {playingLogKey.value === key ? 'Stop' : 'Play'}
+                                    </button>
                                   )}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                                </div>
+                              );
+                            })}
+                          </td>
+                        </tr>
+                      )
+                    ];
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
           {logsMeta.value.pages > 1 && (

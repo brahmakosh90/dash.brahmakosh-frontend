@@ -1,180 +1,72 @@
-import React, { useState, useRef, useEffect } from 'react';
-import api from '../services/api';
+import React from 'react';
+import useRealtimeVoice from '../hooks/useRealtimeVoice';
 
 function VoicePage() {
-  const [chatId, setChatId] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [response, setResponse] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+  const { isConnected, isListening, isSpeaking, error, startSession, endSession } = useRealtimeVoice();
 
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const status = !isConnected
+    ? 'Click to start'
+    : isSpeaking
+    ? 'AI is speaking…'
+    : isListening
+    ? 'Listening… speak now'
+    : 'Connected';
 
-  useEffect(() => {
-    initializeSession();
-  }, []);
-
-  const initializeSession = async () => {
-    try {
-      const res = await api.startVoiceSession();
-      if (res.data.success) {
-        setChatId(res.data.data.chatId);
-      }
-    } catch (error) {
-      console.error('Failed to initialize voice session:', error);
-    }
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm',
-      });
-
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        await processAudio();
-        stream.getTracks().forEach(track => track.stop());
-      };
-
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      alert('Microphone access denied. Please allow microphone permission.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  const blobToBase64 = (blob) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        resolve(reader.result.split(',')[1]);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-
-  const processAudio = async () => {
-    if (!audioChunksRef.current.length || !chatId) return;
-
-    setIsProcessing(true);
-    setTranscript('');
-    setResponse('');
-
-    try {
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      const base64Audio = await blobToBase64(audioBlob);
-
-      const res = await api.processVoice(chatId, base64Audio);
-
-      if (res.data.success) {
-        setTranscript(res.data.data.transcribedText);
-        setResponse(res.data.data.aiResponse);
-
-        if (res.data.data.audioResponse) {
-          const audio = new Audio(
-            `data:audio/mp3;base64,${res.data.data.audioResponse}`
-          );
-          audio.play().catch(err => console.error('Audio play failed:', err));
-        }
-      }
-    } catch (error) {
-      console.error('Failed to process audio:', error);
-      alert('Failed to process audio. Please try again.');
-    } finally {
-      setIsProcessing(false);
-      audioChunksRef.current = [];
-    }
-  };
+  const btnColor = !isConnected ? '#3498db' : isSpeaking ? '#f39c12' : '#27ae60';
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
-      <h1>Voice Chat</h1>
+    <div style={{ maxWidth: '500px', margin: '0 auto', padding: '40px 20px', textAlign: 'center' }}>
+      <h1 style={{ marginBottom: '8px' }}>Voice Chat</h1>
+      <p style={{ color: '#7f8c8d', marginBottom: '40px' }}>Powered by OpenAI Realtime</p>
 
       <div
         style={{
-          textAlign: 'center',
           padding: '40px',
           border: '2px dashed #ddd',
-          borderRadius: '12px',
-          marginBottom: '30px',
+          borderRadius: '16px',
+          marginBottom: '24px',
         }}
       >
         <button
-          onClick={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing}
+          onClick={isConnected ? endSession : startSession}
           style={{
-            width: '120px',
-            height: '120px',
+            width: '130px',
+            height: '130px',
             borderRadius: '50%',
             border: 'none',
-            backgroundColor: isRecording ? '#e74c3c' : '#3498db',
+            backgroundColor: btnColor,
             color: '#fff',
-            fontSize: '18px',
+            fontSize: '16px',
             fontWeight: 'bold',
-            cursor: isProcessing ? 'not-allowed' : 'pointer',
-            opacity: isProcessing ? 0.6 : 1,
+            cursor: 'pointer',
+            transition: 'background-color 0.2s',
+            boxShadow: isConnected ? `0 0 0 8px ${btnColor}33` : 'none',
           }}
         >
-          {isProcessing ? '⏳' : isRecording ? '⏹ Stop' : '🎤 Start'}
+          {!isConnected ? '🎤 Start' : isSpeaking ? '🔊 Speaking' : '⏹ End'}
         </button>
 
-        <p style={{ marginTop: '20px', color: '#7f8c8d' }}>
-          {isRecording
-            ? 'Recording... Click to stop'
-            : isProcessing
-            ? 'Processing...'
-            : 'Click to start recording'}
-        </p>
+        <p style={{ marginTop: '20px', color: '#7f8c8d', fontWeight: 500 }}>{status}</p>
       </div>
 
-      {transcript && (
+      {error && (
         <div
           style={{
-            padding: '15px',
-            backgroundColor: '#e8f4f8',
+            padding: '12px 16px',
+            backgroundColor: '#fdecea',
+            border: '1px solid #f5c6cb',
             borderRadius: '8px',
-            marginBottom: '15px',
+            color: '#c0392b',
+            fontSize: '14px',
           }}
         >
-          <strong>You said:</strong> {transcript}
+          ⚠️ {error}
         </div>
       )}
 
-      {response && (
-        <div
-          style={{
-            padding: '15px',
-            backgroundColor: '#f0f0f0',
-            borderRadius: '8px',
-          }}
-        >
-          <strong>AI Response:</strong> {response}
-        </div>
-      )}
-
-      <div style={{ marginTop: '30px', fontSize: '14px', color: '#7f8c8d' }}>
-        <p>💡 Tip: Speak clearly and wait for the AI response before asking again.</p>
-        {chatId && <p>Chat ID: {chatId}</p>}
-      </div>
+      <p style={{ marginTop: '24px', fontSize: '13px', color: '#95a5a6' }}>
+        💡 Speak naturally — AI will respond in real-time with voice.
+      </p>
     </div>
   );
 }
