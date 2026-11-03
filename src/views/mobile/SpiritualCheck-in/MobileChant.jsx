@@ -111,8 +111,13 @@ export default {
             selectedVideoKey.value = clip.videoKey || '';
             selectedAudioKey.value = clip.audioKey || '';
           } else {
+            // Fallback: use audioUrl directly from configuration
+            const configWithAudio = configs.find(c => c.audioUrl);
             selectedClip.value = null;
-            selectedConfig.value = { karmaPoints: fallbackKarma };
+            selectedConfig.value = configWithAudio || { karmaPoints: fallbackKarma };
+            selectedAudioUrl.value = configWithAudio?.audioUrl || '';
+            selectedAudioKey.value = configWithAudio?.audioKey || '';
+            selectedVideoUrl.value = '';
             availableClips.value = [];
           }
         } catch (error) {
@@ -134,9 +139,9 @@ export default {
       selectedClip.value = clip;
       selectedConfig.value = config;
       selectedVideoUrl.value = clip.videoPresignedUrl || clip.videoUrl || '';
-      selectedAudioUrl.value = clip.audioPresignedUrl || clip.audioUrl || '';
+      selectedAudioUrl.value = clip.audioPresignedUrl || clip.audioUrl || config?.audioUrl || '';
       selectedVideoKey.value = clip.videoKey || '';
-      selectedAudioKey.value = clip.audioKey || '';
+      selectedAudioKey.value = clip.audioKey || config?.audioKey || '';
     };
     
     const startTimer = () => {
@@ -1025,7 +1030,7 @@ export default {
                     controls
                     preload="metadata"
                   >
-                    <source src={previewClip.value.audioPresignedUrl || previewClip.value.audioUrl} type="audio/mpeg" />
+                    <source src={previewClip.value.audioPresignedUrl || previewClip.value.audioUrl} type={((previewClip.value.audioPresignedUrl || previewClip.value.audioUrl) || '').endsWith('.wav') ? 'audio/wav' : 'audio/mpeg'} />
                   </audio>
                 </div>
               )}
@@ -1091,7 +1096,7 @@ export default {
                 loop
                 preload="auto"
               >
-                <source src={selectedAudioUrl.value} type="audio/mpeg" />
+                <source src={selectedAudioUrl.value} type={selectedAudioUrl.value?.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg'} />
               </audio>
             )}
             
