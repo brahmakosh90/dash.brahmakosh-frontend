@@ -271,18 +271,35 @@ export default {
       }
     };
 
-    const openEditModal = (puja) => {
+    const openEditModal = async (puja) => {
       isEdit.value = true;
-      selectedPuja.value = puja;
-      formData.value = {
-        ...puja,
-        thumbnailImage: null,
-        pujaVidhi: JSON.parse(JSON.stringify(puja.pujaVidhi || [{ stepNumber: 1, title: '', description: '' }])),
-        samagriList: JSON.parse(JSON.stringify(puja.samagriList || [{ itemName: '', quantity: '', isOptional: false }])),
-        mantras: JSON.parse(JSON.stringify(puja.mantras || [{ mantraText: '', meaning: '' }]))
-      };
-      selectedCategory.value = puja.category;
-      availableSubcategories.value = categories.value[puja.category] || [];
+      loading.value = true;
+      try {
+        const full = await pujaPadhatiService.getById(puja._id);
+        selectedPuja.value = full;
+        formData.value = {
+          ...full,
+          thumbnailImage: null,
+          pujaVidhi: JSON.parse(JSON.stringify(full.pujaVidhi?.length ? full.pujaVidhi : [{ stepNumber: 1, title: '', description: '' }])),
+          samagriList: JSON.parse(JSON.stringify(full.samagriList?.length ? full.samagriList : [{ itemName: '', quantity: '', isOptional: false }])),
+          mantras: JSON.parse(JSON.stringify(full.mantras?.length ? full.mantras : [{ mantraText: '', meaning: '' }]))
+        };
+        selectedCategory.value = full.category;
+        availableSubcategories.value = categories.value[full.category] || [];
+      } catch {
+        selectedPuja.value = puja;
+        formData.value = {
+          ...puja,
+          thumbnailImage: null,
+          pujaVidhi: JSON.parse(JSON.stringify(puja.pujaVidhi?.length ? puja.pujaVidhi : [{ stepNumber: 1, title: '', description: '' }])),
+          samagriList: JSON.parse(JSON.stringify(puja.samagriList?.length ? puja.samagriList : [{ itemName: '', quantity: '', isOptional: false }])),
+          mantras: JSON.parse(JSON.stringify(puja.mantras?.length ? puja.mantras : [{ mantraText: '', meaning: '' }]))
+        };
+        selectedCategory.value = puja.category;
+        availableSubcategories.value = categories.value[puja.category] || [];
+      } finally {
+        loading.value = false;
+      }
       thumbnailUploaded.value = false;
       thumbnailFileName.value = '';
       audioUploaded.value = false;
@@ -517,10 +534,15 @@ export default {
       showDropdown.value = {};
     };
 
-    const viewPuja = (puja) => {
-      selectedPuja.value = puja;
-      showViewModal.value = true;
+    const viewPuja = async (puja) => {
       closeAllDropdowns();
+      try {
+        const full = await pujaPadhatiService.getById(puja._id);
+        selectedPuja.value = full;
+      } catch {
+        selectedPuja.value = puja;
+      }
+      showViewModal.value = true;
     };
 
     const closeViewModal = () => {
