@@ -1105,9 +1105,15 @@ export default {
 
                     <div class="mb-3">
                       <label class="form-label fw-semibold">Thumbnail Image</label>
+                      {isEdit.value && formData.value.thumbnailUrl && !thumbnailUploaded.value && (
+                        <div class="mb-2 d-flex align-items-center gap-3">
+                          <img src={formData.value.thumbnailUrl} alt="Current thumbnail" style="height: 60px; width: 60px; object-fit: cover; border-radius: 8px; border: 1px solid #dee2e6;" />
+                          <small class="text-muted">Current image — upload new to replace</small>
+                        </div>
+                      )}
                       <input type="file" class="form-control" accept="image/*" onChange={handleThumbnailUpload} />
                       {thumbnailUploaded.value && (
-                        <small class="text-success mt-1 d-block">✓ {thumbnailFileName.value} selected</small>
+                        <small class="text-success mt-1 d-block">✓ {thumbnailFileName.value} selected (will replace current)</small>
                       )}
                       {uploadProgress.value > 0 && uploadProgress.value < 100 && (
                         <div class="progress mt-2" style="height: 4px;">
